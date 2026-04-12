@@ -1,0 +1,24 @@
+{
+  "name": "easilynet-identityserver-admin",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "max dev",
+    "build": "cross-env COMPRESS=none max build",
+    "build:prod": "max build",
+    "preview": "max preview",
+    "postinstall": "max setup"
+  },
+  "dependencies": {
+    "@ant-design/icons": "^5.6.1",
+    "@ant-design/pro-components": "^2.8.6",
+    "@umijs/max": "^4.4.8",
+    "antd": "^5.24.7"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "cross-env": "^10.1.0",
+    "typescript": "^5.7.0"
+  }
+}

@@ -1,0 +1,13 @@
+@EasilyNET.IdentityServer.Admin.Api_HostAddress = http://localhost:5104
+
+#if (EnableOpenAPI)
+GET {{EasilyNET.IdentityServer.Admin.Api_HostAddress}}/openapi/v1.json
+Accept: application/json
+
+###
+#endif
+
+GET {{EasilyNET.IdentityServer.Admin.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
