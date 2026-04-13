@@ -40,6 +40,21 @@ public interface IProfileService
 public class ProfileDataRequest
 {
     /// <summary>
+    /// 客户端
+    /// </summary>
+    public Client? Client { get; init; }
+
+    /// <summary>
+    /// 要求的Claims
+    /// </summary>
+    public IEnumerable<string>? RequestedClaims { get; init; }
+
+    /// <summary>
+    /// 资源 (用于资源 Owner 凭证授权)
+    /// </summary>
+    public IEnumerable<string>? Resources { get; init; }
+
+    /// <summary>
     /// 主题Id
     /// </summary>
     public required string SubjectId { get; init; }
@@ -48,21 +63,6 @@ public class ProfileDataRequest
     /// 请求的令牌类型
     /// </summary>
     public string? TokenType { get; init; }
-
-    /// <summary>
-    /// 客户端
-    /// </summary>
-    public Client? Client { get; init; }
-
-    /// <summary>
-    /// 资源 (用于资源 Owner 凭证授权)
-    /// </summary>
-    public IEnumerable<string>? Resources { get; init; }
-
-    /// <summary>
-    /// 要求的Claims
-    /// </summary>
-    public IEnumerable<string>? RequestedClaims { get; init; }
 }
 
 /// <summary>
@@ -71,14 +71,14 @@ public class ProfileDataRequest
 public class IsActiveRequest
 {
     /// <summary>
-    /// 主题Id
-    /// </summary>
-    public required string SubjectId { get; init; }
-
-    /// <summary>
     /// 客户端
     /// </summary>
     public Client? Client { get; init; }
+
+    /// <summary>
+    /// 主题Id
+    /// </summary>
+    public required string SubjectId { get; init; }
 }
 
 /// <summary>

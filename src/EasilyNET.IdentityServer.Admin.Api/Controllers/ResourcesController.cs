@@ -81,13 +81,13 @@ public class ApiResourcesController(IdentityServerDbContext db) : ControllerBase
 
 public class CreateApiResourceRequest
 {
-    public required string Name { get; set; }
+    public string? Description { get; set; }
 
     public string? DisplayName { get; set; }
 
-    public string? Description { get; set; }
-
     public bool Enabled { get; set; } = true;
+
+    public required string Name { get; set; }
 
     public List<string> Scopes { get; set; } = [];
 
@@ -137,17 +137,17 @@ public class ApiScopesController(IdentityServerDbContext db) : ControllerBase
 
 public class CreateApiScopeRequest
 {
-    public required string Name { get; set; }
+    public string? Description { get; set; }
 
     public string? DisplayName { get; set; }
 
-    public string? Description { get; set; }
+    public bool Emphasize { get; set; }
 
     public bool Enabled { get; set; } = true;
 
-    public bool Required { get; set; }
+    public required string Name { get; set; }
 
-    public bool Emphasize { get; set; }
+    public bool Required { get; set; }
 
     public List<string> UserClaims { get; set; } = [];
 }
@@ -195,17 +195,17 @@ public class IdentityResourcesController(IdentityServerDbContext db) : Controlle
 
 public class CreateIdentityResourceRequest
 {
-    public required string Name { get; set; }
+    public string? Description { get; set; }
 
     public string? DisplayName { get; set; }
 
-    public string? Description { get; set; }
+    public bool Emphasize { get; set; }
 
     public bool Enabled { get; set; } = true;
 
-    public bool Required { get; set; }
+    public required string Name { get; set; }
 
-    public bool Emphasize { get; set; }
+    public bool Required { get; set; }
 
     public bool ShowInDiscoveryDocument { get; set; } = true;
 

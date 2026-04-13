@@ -9,47 +9,47 @@ namespace EasilyNET.IdentityServer.DataAccess.EFCore;
 /// </summary>
 public class IdentityServerDbContext(DbContextOptions<IdentityServerDbContext> options) : DbContext(options), IIdentityServerDbContext
 {
-    public DbSet<ClientEntity> Clients => Set<ClientEntity>();
+    public DbSet<ApiResourceClaimEntity> ApiResourceClaims => Set<ApiResourceClaimEntity>();
 
-    public DbSet<ClientGrantTypeEntity> ClientGrantTypes => Set<ClientGrantTypeEntity>();
-
-    public DbSet<ClientRedirectUriEntity> ClientRedirectUris => Set<ClientRedirectUriEntity>();
-
-    public DbSet<ClientScopeEntity> ClientScopes => Set<ClientScopeEntity>();
-
-    public DbSet<ClientSecretEntity> ClientSecrets => Set<ClientSecretEntity>();
-
-    public DbSet<ClientClaimEntity> ClientClaims => Set<ClientClaimEntity>();
-
-    public DbSet<ClientCorsOriginEntity> ClientCorsOrigins => Set<ClientCorsOriginEntity>();
-
-    public DbSet<ClientPropertyEntity> ClientProperties => Set<ClientPropertyEntity>();
+    public DbSet<ApiResourcePropertyEntity> ApiResourceProperties => Set<ApiResourcePropertyEntity>();
 
     public DbSet<ApiResourceEntity> ApiResources => Set<ApiResourceEntity>();
 
     public DbSet<ApiResourceScopeEntity> ApiResourceScopes => Set<ApiResourceScopeEntity>();
 
-    public DbSet<ApiResourceClaimEntity> ApiResourceClaims => Set<ApiResourceClaimEntity>();
-
     public DbSet<ApiResourceSecretEntity> ApiResourceSecrets => Set<ApiResourceSecretEntity>();
-
-    public DbSet<ApiResourcePropertyEntity> ApiResourceProperties => Set<ApiResourcePropertyEntity>();
-
-    public DbSet<ApiScopeEntity> ApiScopes => Set<ApiScopeEntity>();
 
     public DbSet<ApiScopeClaimEntity> ApiScopeClaims => Set<ApiScopeClaimEntity>();
 
     public DbSet<ApiScopePropertyEntity> ApiScopeProperties => Set<ApiScopePropertyEntity>();
 
-    public DbSet<IdentityResourceEntity> IdentityResources => Set<IdentityResourceEntity>();
+    public DbSet<ApiScopeEntity> ApiScopes => Set<ApiScopeEntity>();
+
+    public DbSet<ClientClaimEntity> ClientClaims => Set<ClientClaimEntity>();
+
+    public DbSet<ClientCorsOriginEntity> ClientCorsOrigins => Set<ClientCorsOriginEntity>();
+
+    public DbSet<ClientGrantTypeEntity> ClientGrantTypes => Set<ClientGrantTypeEntity>();
+
+    public DbSet<ClientPropertyEntity> ClientProperties => Set<ClientPropertyEntity>();
+
+    public DbSet<ClientRedirectUriEntity> ClientRedirectUris => Set<ClientRedirectUriEntity>();
+
+    public DbSet<ClientEntity> Clients => Set<ClientEntity>();
+
+    public DbSet<ClientScopeEntity> ClientScopes => Set<ClientScopeEntity>();
+
+    public DbSet<ClientSecretEntity> ClientSecrets => Set<ClientSecretEntity>();
+
+    public DbSet<DeviceCodeEntity> DeviceCodes => Set<DeviceCodeEntity>();
 
     public DbSet<IdentityResourceClaimEntity> IdentityResourceClaims => Set<IdentityResourceClaimEntity>();
 
     public DbSet<IdentityResourcePropertyEntity> IdentityResourceProperties => Set<IdentityResourcePropertyEntity>();
 
-    public DbSet<PersistedGrantEntity> PersistedGrants => Set<PersistedGrantEntity>();
+    public DbSet<IdentityResourceEntity> IdentityResources => Set<IdentityResourceEntity>();
 
-    public DbSet<DeviceCodeEntity> DeviceCodes => Set<DeviceCodeEntity>();
+    public DbSet<PersistedGrantEntity> PersistedGrants => Set<PersistedGrantEntity>();
 
     public DbSet<UserConsentEntity> UserConsents => Set<UserConsentEntity>();
 

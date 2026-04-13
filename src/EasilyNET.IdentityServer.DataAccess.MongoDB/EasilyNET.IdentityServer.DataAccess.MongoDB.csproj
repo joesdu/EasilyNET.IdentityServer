@@ -1,16 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-	<PropertyGroup>
-		<TargetFramework>net11.0</TargetFramework>
-		<LangVersion>14.0</LangVersion>
-		<ImplicitUsings>enable</ImplicitUsings>
-		<Nullable>enable</Nullable>
-		<GenerateDocumentationFile>true</GenerateDocumentationFile>
-		<NoWarn>$(NoWarn);CS1591</NoWarn>
-	</PropertyGroup>
-
 	<ItemGroup>
-		<PackageReference Include="MongoDB.Driver" Version="3.7.1" />
+		<PackageReference Include="MongoDB.Driver" />
 	</ItemGroup>
 
 	<ItemGroup>

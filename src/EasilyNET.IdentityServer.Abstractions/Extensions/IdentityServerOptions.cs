@@ -43,9 +43,9 @@ public static class ServiceCollectionExtensions
 public class IdentityServerOptions
 {
     /// <summary>
-    /// 颁发者名称
+    /// 绝对刷新令牌生命周期（秒）
     /// </summary>
-    public string Issuer { get; set; } = "https://identityserver.example.com";
+    public int AbsoluteRefreshTokenLifetime { get; set; } = 2592000; // 30天
 
     /// <summary>
     /// 访问令牌生命周期（秒）
@@ -53,14 +53,29 @@ public class IdentityServerOptions
     public int AccessTokenLifetime { get; set; } = 3600;
 
     /// <summary>
-    /// 刷新令牌生命周期（秒）
+    /// 是否允许纯文本 PKCE
     /// </summary>
-    public int RefreshTokenLifetime { get; set; } = 86400;
+    public bool AllowPlainTextPkce { get; set; } = false;
+
+    /// <summary>
+    /// 是否允许刷新令牌重用
+    /// </summary>
+    public bool AllowRefreshTokenReuse { get; set; } = false;
+
+    /// <summary>
+    /// 是否允许 Remember Consent
+    /// </summary>
+    public bool AllowRememberConsent { get; set; } = true;
 
     /// <summary>
     /// 授权码生命周期（秒）
     /// </summary>
     public int AuthorizationCodeLifetime { get; set; } = 300;
+
+    /// <summary>
+    /// 用户Consent持久化超时（秒）
+    /// </summary>
+    public int ConsentLifetime { get; set; } = 30 * 86400; // 30天
 
     /// <summary>
     /// 设备代码生命周期（秒）
@@ -73,24 +88,14 @@ public class IdentityServerOptions
     public bool EnableAbsoluteRefreshTokenLifetime { get; set; } = true;
 
     /// <summary>
-    /// 绝对刷新令牌生命周期（秒）
+    /// 颁发者名称
     /// </summary>
-    public int AbsoluteRefreshTokenLifetime { get; set; } = 2592000; // 30天
+    public string Issuer { get; set; } = "https://identityserver.example.com";
 
     /// <summary>
-    /// 是否允许刷新令牌重用
+    /// 刷新令牌生命周期（秒）
     /// </summary>
-    public bool AllowRefreshTokenReuse { get; set; } = false;
-
-    /// <summary>
-    /// 是否需要 PKCE
-    /// </summary>
-    public bool RequirePkce { get; set; } = true;
-
-    /// <summary>
-    /// 是否允许纯文本 PKCE
-    /// </summary>
-    public bool AllowPlainTextPkce { get; set; } = false;
+    public int RefreshTokenLifetime { get; set; } = 86400;
 
     /// <summary>
     /// 是否需要Consent
@@ -98,12 +103,7 @@ public class IdentityServerOptions
     public bool RequireConsent { get; set; } = true;
 
     /// <summary>
-    /// 是否允许 Remember Consent
+    /// 是否需要 PKCE
     /// </summary>
-    public bool AllowRememberConsent { get; set; } = true;
-
-    /// <summary>
-    /// 用户Consent持久化超时（秒）
-    /// </summary>
-    public int ConsentLifetime { get; set; } = 30 * 86400; // 30天
+    public bool RequirePkce { get; set; } = true;
 }

@@ -2,17 +2,20 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Xunit;
 
 namespace EasilyNET.IdentityServer.IntegrationTests;
 
-public class IdentityServerTests : IClassFixture<WebApplicationFactory<Program>>
+[TestClass]
+public class IdentityServerTests
 {
-    private readonly HttpClient _client;
+    private HttpClient _client = null!;
 
-    public IdentityServerTests(WebApplicationFactory<Program> factory)
+    [TestInitialize]
+    public void Setup()
     {
-        _client = factory.WithWebHostBuilder(builder => { builder.UseSetting("ASPNETCORE_ENVIRONMENT", "Development"); }).CreateClient();
+        var factory = new WebApplicationFactory<Program>()
+            .WithWebHostBuilder(builder => builder.UseSetting("ASPNETCORE_ENVIRONMENT", "Development"));
+        _client = factory.CreateClient();
     }
 
     private static HttpRequestMessage PostForm(string url, Dictionary<string, string> form, string? basicAuth = null)
@@ -31,7 +34,7 @@ public class IdentityServerTests : IClassFixture<WebApplicationFactory<Program>>
 
     #region Revocation
 
-    [Fact]
+    [TestMethod]
     public async Task Revocation_ValidToken_Returns200()
     {
         // Get a token first
@@ -58,56 +61,56 @@ public class IdentityServerTests : IClassFixture<WebApplicationFactory<Program>>
 
     #region Health
 
-    [Fact]
+    [TestMethod]
     public async Task Health_ReturnsOk()
     {
         var response = await _client.GetAsync("/health");
         response.EnsureSuccessStatusCode();
         var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
-        Assert.Equal("healthy", json.RootElement.GetProperty("status").GetString());
+        Assert.AreEqual("healthy", json.RootElement.GetProperty("status").GetString());
     }
 
     #endregion
 
     #region Discovery
 
-    [Fact]
+    [TestMethod]
     public async Task Discovery_ReturnsExpectedEndpoints()
     {
         var response = await _client.GetAsync("/.well-known/openid-configuration");
         response.EnsureSuccessStatusCode();
         var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
         var root = json.RootElement;
-        Assert.True(root.TryGetProperty("issuer", out _));
-        Assert.True(root.TryGetProperty("token_endpoint", out _));
-        Assert.True(root.TryGetProperty("authorization_endpoint", out _));
-        Assert.True(root.TryGetProperty("device_authorization_endpoint", out _));
-        Assert.True(root.TryGetProperty("introspection_endpoint", out _));
-        Assert.True(root.TryGetProperty("revocation_endpoint", out _));
-        Assert.True(root.TryGetProperty("jwks_uri", out _));
+        Assert.IsTrue(root.TryGetProperty("issuer", out _));
+        Assert.IsTrue(root.TryGetProperty("token_endpoint", out _));
+        Assert.IsTrue(root.TryGetProperty("authorization_endpoint", out _));
+        Assert.IsTrue(root.TryGetProperty("device_authorization_endpoint", out _));
+        Assert.IsTrue(root.TryGetProperty("introspection_endpoint", out _));
+        Assert.IsTrue(root.TryGetProperty("revocation_endpoint", out _));
+        Assert.IsTrue(root.TryGetProperty("jwks_uri", out _));
         var grantTypes = root.GetProperty("grant_types_supported");
         var grants = grantTypes.EnumerateArray().Select(e => e.GetString()).ToList();
-        Assert.Contains("authorization_code", grants);
-        Assert.Contains("client_credentials", grants);
-        Assert.Contains("refresh_token", grants);
-        Assert.Contains("urn:ietf:params:oauth:grant-type:device_code", grants);
+        Assert.IsTrue(grants.Contains("authorization_code"));
+        Assert.IsTrue(grants.Contains("client_credentials"));
+        Assert.IsTrue(grants.Contains("refresh_token"));
+        Assert.IsTrue(grants.Contains("urn:ietf:params:oauth:grant-type:device_code"));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task Jwks_ReturnsKeysArray()
     {
         var response = await _client.GetAsync("/.well-known/jwks");
         response.EnsureSuccessStatusCode();
         var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
-        Assert.True(json.RootElement.TryGetProperty("keys", out var keys));
-        Assert.Equal(JsonValueKind.Array, keys.ValueKind);
+        Assert.IsTrue(json.RootElement.TryGetProperty("keys", out var keys));
+        Assert.AreEqual(JsonValueKind.Array, keys.ValueKind);
     }
 
     #endregion
 
     #region Client Credentials
 
-    [Fact]
+    [TestMethod]
     public async Task ClientCredentials_ValidClient_ReturnsAccessToken()
     {
         var response = await _client.SendAsync(PostForm("/connect/token", new()
@@ -120,16 +123,16 @@ public class IdentityServerTests : IClassFixture<WebApplicationFactory<Program>>
 
         // Read body for diagnostics on failure
         var body = await response.Content.ReadAsStringAsync();
-        Assert.True(response.IsSuccessStatusCode, $"Expected 2xx but got {(int)response.StatusCode}: {body}");
+        Assert.IsTrue(response.IsSuccessStatusCode, $"Expected 2xx but got {(int)response.StatusCode}: {body}");
         var json = JsonDocument.Parse(body);
         var root = json.RootElement;
-        Assert.True(root.TryGetProperty("access_token", out var at));
-        Assert.False(string.IsNullOrEmpty(at.GetString()));
-        Assert.Equal("Bearer", root.GetProperty("token_type").GetString());
-        Assert.True(root.GetProperty("expires_in").GetInt32() > 0);
+        Assert.IsTrue(root.TryGetProperty("access_token", out var at));
+        Assert.IsFalse(string.IsNullOrEmpty(at.GetString()));
+        Assert.AreEqual("Bearer", root.GetProperty("token_type").GetString());
+        Assert.IsTrue(root.GetProperty("expires_in").GetInt32() > 0);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ClientCredentials_BasicAuth_ReturnsAccessToken()
     {
         var response = await _client.SendAsync(PostForm("/connect/token", new()
@@ -139,10 +142,10 @@ public class IdentityServerTests : IClassFixture<WebApplicationFactory<Program>>
         }, "console:secret"));
         response.EnsureSuccessStatusCode();
         var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
-        Assert.True(json.RootElement.TryGetProperty("access_token", out _));
+        Assert.IsTrue(json.RootElement.TryGetProperty("access_token", out _));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ClientCredentials_InvalidSecret_ReturnsUnauthorized()
     {
         var response = await _client.SendAsync(PostForm("/connect/token", new()
@@ -151,10 +154,10 @@ public class IdentityServerTests : IClassFixture<WebApplicationFactory<Program>>
             ["client_id"] = "console",
             ["client_secret"] = "wrong-secret"
         }));
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ClientCredentials_InvalidScope_ReturnsBadRequest()
     {
         var response = await _client.SendAsync(PostForm("/connect/token", new()
@@ -164,10 +167,10 @@ public class IdentityServerTests : IClassFixture<WebApplicationFactory<Program>>
             ["client_secret"] = "secret",
             ["scope"] = "nonexistent-scope"
         }));
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ClientCredentials_UnknownClient_ReturnsUnauthorized()
     {
         var response = await _client.SendAsync(PostForm("/connect/token", new()
@@ -176,14 +179,14 @@ public class IdentityServerTests : IClassFixture<WebApplicationFactory<Program>>
             ["client_id"] = "unknown",
             ["client_secret"] = "secret"
         }));
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
     #endregion
 
     #region Token Endpoint Validation
 
-    [Fact]
+    [TestMethod]
     public async Task Token_MissingGrantType_ReturnsBadRequest()
     {
         var response = await _client.SendAsync(PostForm("/connect/token", new()
@@ -191,10 +194,10 @@ public class IdentityServerTests : IClassFixture<WebApplicationFactory<Program>>
             ["client_id"] = "console",
             ["client_secret"] = "secret"
         }));
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task Token_UnsupportedGrantType_ReturnsError()
     {
         var response = await _client.SendAsync(PostForm("/connect/token", new()
@@ -203,14 +206,14 @@ public class IdentityServerTests : IClassFixture<WebApplicationFactory<Program>>
             ["client_id"] = "console",
             ["client_secret"] = "secret"
         }));
-        Assert.True(response.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Unauthorized);
+        Assert.IsTrue(response.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Unauthorized);
     }
 
     #endregion
 
     #region Introspection
 
-    [Fact]
+    [TestMethod]
     public async Task Introspection_ValidToken_ReturnsActive()
     {
         // Get a token first
@@ -232,10 +235,10 @@ public class IdentityServerTests : IClassFixture<WebApplicationFactory<Program>>
         }, "console:secret"));
         response.EnsureSuccessStatusCode();
         var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
-        Assert.True(json.RootElement.GetProperty("active").GetBoolean());
+        Assert.IsTrue(json.RootElement.GetProperty("active").GetBoolean());
     }
 
-    [Fact]
+    [TestMethod]
     public async Task Introspection_InvalidToken_ReturnsInactive()
     {
         var response = await _client.SendAsync(PostForm("/connect/introspect", new()
@@ -244,14 +247,14 @@ public class IdentityServerTests : IClassFixture<WebApplicationFactory<Program>>
         }, "console:secret"));
         response.EnsureSuccessStatusCode();
         var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
-        Assert.False(json.RootElement.GetProperty("active").GetBoolean());
+        Assert.IsFalse(json.RootElement.GetProperty("active").GetBoolean());
     }
 
     #endregion
 
     #region Device Flow
 
-    [Fact]
+    [TestMethod]
     public async Task DeviceAuthorization_ValidClient_ReturnsDeviceCode()
     {
         var response = await _client.SendAsync(PostForm("/connect/device_authorization", new()
@@ -262,27 +265,27 @@ public class IdentityServerTests : IClassFixture<WebApplicationFactory<Program>>
         response.EnsureSuccessStatusCode();
         var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
         var root = json.RootElement;
-        Assert.True(root.TryGetProperty("device_code", out var dc));
-        Assert.False(string.IsNullOrEmpty(dc.GetString()));
-        Assert.True(root.TryGetProperty("user_code", out var uc));
-        Assert.False(string.IsNullOrEmpty(uc.GetString()));
-        Assert.True(root.TryGetProperty("verification_uri", out _));
-        Assert.True(root.TryGetProperty("verification_uri_complete", out _));
-        Assert.True(root.GetProperty("expires_in").GetInt32() > 0);
-        Assert.Equal(5, root.GetProperty("interval").GetInt32());
+        Assert.IsTrue(root.TryGetProperty("device_code", out var dc));
+        Assert.IsFalse(string.IsNullOrEmpty(dc.GetString()));
+        Assert.IsTrue(root.TryGetProperty("user_code", out var uc));
+        Assert.IsFalse(string.IsNullOrEmpty(uc.GetString()));
+        Assert.IsTrue(root.TryGetProperty("verification_uri", out _));
+        Assert.IsTrue(root.TryGetProperty("verification_uri_complete", out _));
+        Assert.IsTrue(root.GetProperty("expires_in").GetInt32() > 0);
+        Assert.AreEqual(5, root.GetProperty("interval").GetInt32());
     }
 
-    [Fact]
+    [TestMethod]
     public async Task DeviceAuthorization_UnauthorizedClient_Returns400()
     {
         var response = await _client.SendAsync(PostForm("/connect/device_authorization", new()
         {
             ["client_id"] = "console"
         }));
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task DeviceCode_PendingAuthorization_ReturnsAuthorizationPending()
     {
         // Get device code
@@ -302,12 +305,12 @@ public class IdentityServerTests : IClassFixture<WebApplicationFactory<Program>>
             ["client_id"] = "device",
             ["device_code"] = deviceCode
         }));
-        Assert.Equal(HttpStatusCode.BadRequest, tokenResponse.StatusCode);
+        Assert.AreEqual(HttpStatusCode.BadRequest, tokenResponse.StatusCode);
         var errorJson = await JsonDocument.ParseAsync(await tokenResponse.Content.ReadAsStreamAsync());
-        Assert.Equal("authorization_pending", errorJson.RootElement.GetProperty("error").GetString());
+        Assert.AreEqual("authorization_pending", errorJson.RootElement.GetProperty("error").GetString());
     }
 
-    [Fact]
+    [TestMethod]
     public async Task DeviceCode_FullFlow_ReturnsAccessToken()
     {
         // Step 1: Get device code
@@ -338,9 +341,9 @@ public class IdentityServerTests : IClassFixture<WebApplicationFactory<Program>>
         }));
         tokenResponse.EnsureSuccessStatusCode();
         var tokenJson = await JsonDocument.ParseAsync(await tokenResponse.Content.ReadAsStreamAsync());
-        Assert.True(tokenJson.RootElement.TryGetProperty("access_token", out var at));
-        Assert.False(string.IsNullOrEmpty(at.GetString()));
-        Assert.Equal("Bearer", tokenJson.RootElement.GetProperty("token_type").GetString());
+        Assert.IsTrue(tokenJson.RootElement.TryGetProperty("access_token", out var at));
+        Assert.IsFalse(string.IsNullOrEmpty(at.GetString()));
+        Assert.AreEqual("Bearer", tokenJson.RootElement.GetProperty("token_type").GetString());
     }
 
     #endregion

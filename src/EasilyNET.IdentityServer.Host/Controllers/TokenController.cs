@@ -334,15 +334,15 @@ public class TokenController : ControllerBase
 /// </summary>
 internal sealed class TokenErrorResponse
 {
+    public string error { get; }
+
+    public string? error_description { get; }
+
     public TokenErrorResponse(string error, string? errorDescription = null)
     {
         this.error = error;
         error_description = errorDescription;
     }
-
-    public string error { get; }
-
-    public string? error_description { get; }
 }
 
 /// <summary>
@@ -350,6 +350,16 @@ internal sealed class TokenErrorResponse
 /// </summary>
 internal sealed class TokenSuccessResponse
 {
+    public string access_token { get; }
+
+    public int expires_in { get; }
+
+    public string? refresh_token { get; }
+
+    public string? scope { get; }
+
+    public string token_type { get; }
+
     public TokenSuccessResponse(TokenResult result)
     {
         access_token = result.AccessToken;
@@ -358,14 +368,4 @@ internal sealed class TokenSuccessResponse
         refresh_token = result.RefreshToken;
         scope = result.Scope;
     }
-
-    public string access_token { get; }
-
-    public string token_type { get; }
-
-    public int expires_in { get; }
-
-    public string? refresh_token { get; }
-
-    public string? scope { get; }
 }

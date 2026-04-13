@@ -1,0 +1,12 @@
+<Project>
+	<PropertyGroup>
+		<ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+	</PropertyGroup>
+	<!-- Testing (MSTest) -->
+	<ItemGroup Label="Testing">
+		<PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="11.0.0-preview.2.26159.112" />
+		<PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.4.0" />
+		<PackageVersion Include="MSTest.TestAdapter" Version="4.2.1" />
+		<PackageVersion Include="MSTest.TestFramework" Version="4.2.1" />
+	</ItemGroup>
+</Project>

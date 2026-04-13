@@ -6,11 +6,6 @@ namespace EasilyNET.IdentityServer.Abstractions.Models;
 public class Secret
 {
     /// <summary>
-    /// 密钥值
-    /// </summary>
-    public required string Value { get; init; }
-
-    /// <summary>
     /// 描述
     /// </summary>
     public string? Description { get; init; }
@@ -24,6 +19,11 @@ public class Secret
     /// 类型
     /// </summary>
     public string Type { get; init; } = "SharedSecret";
+
+    /// <summary>
+    /// 密钥值
+    /// </summary>
+    public required string Value { get; init; }
 }
 
 /// <summary>

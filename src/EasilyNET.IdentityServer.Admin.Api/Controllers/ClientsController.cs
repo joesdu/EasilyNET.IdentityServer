@@ -119,69 +119,69 @@ public class ClientsController(IdentityServerDbContext db) : ControllerBase
 
 public class CreateClientRequest
 {
+    public int AccessTokenLifetime { get; set; } = 3600;
+
+    public List<string> AllowedGrantTypes { get; set; } = [];
+
+    public List<string> AllowedScopes { get; set; } = [];
+
+    public int AuthorizationCodeLifetime { get; set; } = 300;
+
     public required string ClientId { get; set; }
 
     public string? ClientName { get; set; }
 
+    public List<SecretInput> ClientSecrets { get; set; } = [];
+
+    public int ClientType { get; set; }
+
     public string? Description { get; set; }
 
     public bool Enabled { get; set; } = true;
 
-    public int ClientType { get; set; }
+    public List<string> RedirectUris { get; set; } = [];
 
-    public bool RequirePkce { get; set; } = true;
+    public int RefreshTokenLifetime { get; set; } = 86400;
 
     public bool RequireClientSecret { get; set; } = true;
 
     public bool RequireConsent { get; set; }
 
-    public int AccessTokenLifetime { get; set; } = 3600;
-
-    public int RefreshTokenLifetime { get; set; } = 86400;
-
-    public int AuthorizationCodeLifetime { get; set; } = 300;
-
-    public List<string> AllowedGrantTypes { get; set; } = [];
-
-    public List<string> AllowedScopes { get; set; } = [];
-
-    public List<string> RedirectUris { get; set; } = [];
-
-    public List<SecretInput> ClientSecrets { get; set; } = [];
+    public bool RequirePkce { get; set; } = true;
 }
 
 public class UpdateClientRequest
 {
-    public string? ClientName { get; set; }
-
-    public string? Description { get; set; }
-
-    public bool Enabled { get; set; } = true;
-
-    public int ClientType { get; set; }
-
-    public bool RequirePkce { get; set; } = true;
-
-    public bool RequireClientSecret { get; set; } = true;
-
-    public bool RequireConsent { get; set; }
-
     public int AccessTokenLifetime { get; set; } = 3600;
-
-    public int RefreshTokenLifetime { get; set; } = 86400;
 
     public List<string> AllowedGrantTypes { get; set; } = [];
 
     public List<string> AllowedScopes { get; set; } = [];
 
+    public string? ClientName { get; set; }
+
+    public int ClientType { get; set; }
+
+    public string? Description { get; set; }
+
+    public bool Enabled { get; set; } = true;
+
     public List<string> RedirectUris { get; set; } = [];
+
+    public int RefreshTokenLifetime { get; set; } = 86400;
+
+    public bool RequireClientSecret { get; set; } = true;
+
+    public bool RequireConsent { get; set; }
+
+    public bool RequirePkce { get; set; } = true;
 }
 
 public class SecretInput
 {
-    public required string Value { get; set; }
-
     public string? Description { get; set; }
 
     public string? Type { get; set; }
+
+    public required string Value { get; set; }
 }

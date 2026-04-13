@@ -5,25 +5,25 @@ namespace EasilyNET.IdentityServer.DataAccess.EFCore.Entities;
 /// </summary>
 public class PersistedGrantEntity
 {
-    public required string Key { get; set; }
-
-    public required string Type { get; set; }
-
-    public string? SubjectId { get; set; }
-
     public required string ClientId { get; set; }
-
-    public string? SessionId { get; set; }
-
-    public string? Description { get; set; }
-
-    public DateTime CreationTime { get; set; }
-
-    public DateTime? ExpirationTime { get; set; }
 
     public DateTime? ConsumedTime { get; set; }
 
+    public DateTime CreationTime { get; set; }
+
     public required string Data { get; set; }
+
+    public string? Description { get; set; }
+
+    public DateTime? ExpirationTime { get; set; }
+
+    public required string Key { get; set; }
+
+    public string? SessionId { get; set; }
+
+    public string? SubjectId { get; set; }
+
+    public required string Type { get; set; }
 }
 
 /// <summary>
@@ -31,23 +31,23 @@ public class PersistedGrantEntity
 /// </summary>
 public class DeviceCodeEntity
 {
-    public int Id { get; set; }
-
-    public required string DeviceCode { get; set; }
-
-    public required string UserCode { get; set; }
-
-    public string? SubjectId { get; set; }
-
     public required string ClientId { get; set; }
-
-    public string? Description { get; set; }
 
     public DateTime CreationTime { get; set; }
 
+    public required string Data { get; set; }
+
+    public string? Description { get; set; }
+
+    public required string DeviceCode { get; set; }
+
     public DateTime ExpirationTime { get; set; }
 
-    public required string Data { get; set; }
+    public int Id { get; set; }
+
+    public string? SubjectId { get; set; }
+
+    public required string UserCode { get; set; }
 }
 
 /// <summary>
@@ -55,15 +55,15 @@ public class DeviceCodeEntity
 /// </summary>
 public class UserConsentEntity
 {
-    public int Id { get; set; }
-
-    public required string SubjectId { get; set; }
-
     public required string ClientId { get; set; }
-
-    public required string Scopes { get; set; }
 
     public DateTime CreationTime { get; set; }
 
     public DateTime? ExpirationTime { get; set; }
+
+    public int Id { get; set; }
+
+    public required string Scopes { get; set; }
+
+    public required string SubjectId { get; set; }
 }

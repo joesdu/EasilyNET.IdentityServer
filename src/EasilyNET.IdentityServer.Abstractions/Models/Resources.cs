@@ -6,14 +6,9 @@ namespace EasilyNET.IdentityServer.Abstractions.Models;
 public class ApiResource
 {
     /// <summary>
-    /// 唯一标识符
+    /// 密钥列表
     /// </summary>
-    public required string Name { get; init; }
-
-    /// <summary>
-    /// 显示名称
-    /// </summary>
-    public string? DisplayName { get; init; }
+    public IEnumerable<Secret> ApiSecrets { get; init; } = [];
 
     /// <summary>
     /// 描述
@@ -21,9 +16,24 @@ public class ApiResource
     public string? Description { get; init; }
 
     /// <summary>
+    /// 显示名称
+    /// </summary>
+    public string? DisplayName { get; init; }
+
+    /// <summary>
     /// 是否启用
     /// </summary>
     public bool Enabled { get; init; } = true;
+
+    /// <summary>
+    /// 唯一标识符
+    /// </summary>
+    public required string Name { get; init; }
+
+    /// <summary>
+    /// 额外的属性
+    /// </summary>
+    public IDictionary<string, string> Properties { get; init; } = new Dictionary<string, string>();
 
     /// <summary>
     /// 允许的作用域
@@ -34,16 +44,6 @@ public class ApiResource
     /// 允许的声明
     /// </summary>
     public IEnumerable<string> UserClaims { get; init; } = [];
-
-    /// <summary>
-    /// 密钥列表
-    /// </summary>
-    public IEnumerable<Secret> ApiSecrets { get; init; } = [];
-
-    /// <summary>
-    /// 额外的属性
-    /// </summary>
-    public IDictionary<string, string> Properties { get; init; } = new Dictionary<string, string>();
 }
 
 /// <summary>
@@ -52,9 +52,9 @@ public class ApiResource
 public class ApiScope
 {
     /// <summary>
-    /// 唯一标识符
+    /// 描述
     /// </summary>
-    public required string Name { get; init; }
+    public string? Description { get; init; }
 
     /// <summary>
     /// 显示名称
@@ -62,9 +62,9 @@ public class ApiScope
     public string? DisplayName { get; init; }
 
     /// <summary>
-    /// 描述
+    /// 是否可以在同意屏幕中取消选择
     /// </summary>
-    public string? Description { get; init; }
+    public bool Emphasize { get; init; }
 
     /// <summary>
     /// 是否启用
@@ -72,24 +72,24 @@ public class ApiScope
     public bool Enabled { get; init; } = true;
 
     /// <summary>
-    /// 是否必须显示在发现文档中
+    /// 唯一标识符
     /// </summary>
-    public bool Required { get; init; }
-
-    /// <summary>
-    /// 是否可以在同意屏幕中取消选择
-    /// </summary>
-    public bool Emphasize { get; init; }
-
-    /// <summary>
-    /// 允许的声明
-    /// </summary>
-    public IEnumerable<string> UserClaims { get; init; } = [];
+    public required string Name { get; init; }
 
     /// <summary>
     /// 额外的属性
     /// </summary>
     public IDictionary<string, string> Properties { get; init; } = new Dictionary<string, string>();
+
+    /// <summary>
+    /// 是否必须显示在发现文档中
+    /// </summary>
+    public bool Required { get; init; }
+
+    /// <summary>
+    /// 允许的声明
+    /// </summary>
+    public IEnumerable<string> UserClaims { get; init; } = [];
 }
 
 /// <summary>
@@ -98,9 +98,9 @@ public class ApiScope
 public class IdentityResource
 {
     /// <summary>
-    /// 唯一标识符
+    /// 描述
     /// </summary>
-    public required string Name { get; init; }
+    public string? Description { get; init; }
 
     /// <summary>
     /// 显示名称
@@ -108,9 +108,9 @@ public class IdentityResource
     public string? DisplayName { get; init; }
 
     /// <summary>
-    /// 描述
+    /// 是否可以在同意屏幕中取消选择
     /// </summary>
-    public string? Description { get; init; }
+    public bool Emphasize { get; init; }
 
     /// <summary>
     /// 是否启用
@@ -118,14 +118,19 @@ public class IdentityResource
     public bool Enabled { get; init; } = true;
 
     /// <summary>
+    /// 唯一标识符
+    /// </summary>
+    public required string Name { get; init; }
+
+    /// <summary>
+    /// 额外的属性
+    /// </summary>
+    public IDictionary<string, string> Properties { get; init; } = new Dictionary<string, string>();
+
+    /// <summary>
     /// 是否必须显示在发现文档中
     /// </summary>
     public bool Required { get; init; }
-
-    /// <summary>
-    /// 是否可以在同意屏幕中取消选择
-    /// </summary>
-    public bool Emphasize { get; init; }
 
     /// <summary>
     /// 是否可以在同意屏幕中取消选择
@@ -136,11 +141,6 @@ public class IdentityResource
     /// 允许的声明
     /// </summary>
     public required IEnumerable<string> UserClaims { get; init; }
-
-    /// <summary>
-    /// 额外的属性
-    /// </summary>
-    public IDictionary<string, string> Properties { get; init; } = new Dictionary<string, string>();
 }
 
 /// <summary>

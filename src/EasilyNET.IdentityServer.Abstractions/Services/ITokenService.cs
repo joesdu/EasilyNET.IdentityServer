@@ -34,14 +34,34 @@ public interface ITokenService
 public class TokenRequest
 {
     /// <summary>
+    /// 授权码 (用于 Authorization Code 流程)
+    /// </summary>
+    public string? AuthorizationCode { get; init; }
+
+    /// <summary>
+    /// 附加声明
+    /// </summary>
+    public IDictionary<string, object>? Claims { get; init; }
+
+    /// <summary>
     /// 客户端
     /// </summary>
     public required Client Client { get; init; }
 
     /// <summary>
+    /// PKCE Code Verifier
+    /// </summary>
+    public string? CodeVerifier { get; init; }
+
+    /// <summary>
     /// 授权类型
     /// </summary>
     public required string GrantType { get; init; }
+
+    /// <summary>
+    /// Refresh Token (用于 Refresh Token 流程)
+    /// </summary>
+    public string? RefreshToken { get; init; }
 
     /// <summary>
     /// 作用域
@@ -52,26 +72,6 @@ public class TokenRequest
     /// 主题Id (用户Id)
     /// </summary>
     public string? SubjectId { get; init; }
-
-    /// <summary>
-    /// 授权码 (用于 Authorization Code 流程)
-    /// </summary>
-    public string? AuthorizationCode { get; init; }
-
-    /// <summary>
-    /// Refresh Token (用于 Refresh Token 流程)
-    /// </summary>
-    public string? RefreshToken { get; init; }
-
-    /// <summary>
-    /// PKCE Code Verifier
-    /// </summary>
-    public string? CodeVerifier { get; init; }
-
-    /// <summary>
-    /// 附加声明
-    /// </summary>
-    public IDictionary<string, object>? Claims { get; init; }
 }
 
 /// <summary>
@@ -85,6 +85,21 @@ public class AuthorizationCodeRequest
     public required Client Client { get; init; }
 
     /// <summary>
+    /// Nonce
+    /// </summary>
+    public string? Nonce { get; init; }
+
+    /// <summary>
+    /// 重定向 URI
+    /// </summary>
+    public required string RedirectUri { get; init; }
+
+    /// <summary>
+    /// 附加请求参数
+    /// </summary>
+    public IDictionary<string, string>? RequestParameters { get; init; }
+
+    /// <summary>
     /// 作用域
     /// </summary>
     public required IEnumerable<string> Scopes { get; init; }
@@ -93,21 +108,6 @@ public class AuthorizationCodeRequest
     /// 主题Id
     /// </summary>
     public required string SubjectId { get; init; }
-
-    /// <summary>
-    /// 重定向 URI
-    /// </summary>
-    public required string RedirectUri { get; init; }
-
-    /// <summary>
-    /// Nonce
-    /// </summary>
-    public string? Nonce { get; init; }
-
-    /// <summary>
-    /// 附加请求参数
-    /// </summary>
-    public IDictionary<string, string>? RequestParameters { get; init; }
 }
 
 /// <summary>
@@ -121,14 +121,14 @@ public class TokenResult
     public required string AccessToken { get; init; }
 
     /// <summary>
-    /// Token 类型
-    /// </summary>
-    public string TokenType { get; init; } = "Bearer";
-
-    /// <summary>
     /// 过期时间 (秒)
     /// </summary>
     public int ExpiresIn { get; init; }
+
+    /// <summary>
+    /// 额外参数
+    /// </summary>
+    public IDictionary<string, string>? Extra { get; init; }
 
     /// <summary>
     /// Refresh Token
@@ -141,9 +141,9 @@ public class TokenResult
     public string? Scope { get; init; }
 
     /// <summary>
-    /// 额外参数
+    /// Token 类型
     /// </summary>
-    public IDictionary<string, string>? Extra { get; init; }
+    public string TokenType { get; init; } = "Bearer";
 }
 
 /// <summary>
@@ -152,9 +152,9 @@ public class TokenResult
 public class TokenValidationResult
 {
     /// <summary>
-    /// 是否有效
+    /// 客户端Id
     /// </summary>
-    public bool IsValid { get; init; }
+    public string? ClientId { get; init; }
 
     /// <summary>
     /// 错误信息
@@ -167,14 +167,14 @@ public class TokenValidationResult
     public string? ErrorDescription { get; init; }
 
     /// <summary>
-    /// 客户端Id
+    /// 过期时间
     /// </summary>
-    public string? ClientId { get; init; }
+    public DateTime? ExpirationTime { get; init; }
 
     /// <summary>
-    /// 主题Id
+    /// 是否有效
     /// </summary>
-    public string? SubjectId { get; init; }
+    public bool IsValid { get; init; }
 
     /// <summary>
     /// 作用域
@@ -182,7 +182,7 @@ public class TokenValidationResult
     public IEnumerable<string>? Scopes { get; init; }
 
     /// <summary>
-    /// 过期时间
+    /// 主题Id
     /// </summary>
-    public DateTime? ExpirationTime { get; init; }
+    public string? SubjectId { get; init; }
 }

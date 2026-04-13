@@ -2,7 +2,6 @@ using EasilyNET.IdentityServer.Abstractions.Stores;
 using EasilyNET.IdentityServer.DataAccess.EFCore.Stores;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Pomelo.EntityFrameworkCore.MySql.Infrastructure;
 
 namespace EasilyNET.IdentityServer.DataAccess.EFCore.MySQL.Extensions;
 

@@ -19,6 +19,11 @@ public interface IClientAuthenticationService
 public class ClientAuthenticationRequest
 {
     /// <summary>
+    /// 客户端断言 (JWT)
+    /// </summary>
+    public string? ClientAssertion { get; init; }
+
+    /// <summary>
     /// 客户端Id
     /// </summary>
     public required string ClientId { get; init; }
@@ -27,11 +32,6 @@ public class ClientAuthenticationRequest
     /// 客户端密钥
     /// </summary>
     public string? ClientSecret { get; init; }
-
-    /// <summary>
-    /// 客户端断言 (JWT)
-    /// </summary>
-    public string? ClientAssertion { get; init; }
 
     /// <summary>
     /// 授权类型
@@ -50,11 +50,6 @@ public class ClientAuthenticationRequest
 public class ClientAuthenticationResult
 {
     /// <summary>
-    /// 是否成功
-    /// </summary>
-    public bool IsSuccess { get; init; }
-
-    /// <summary>
     /// 客户端
     /// </summary>
     public Client? Client { get; init; }
@@ -68,6 +63,11 @@ public class ClientAuthenticationResult
     /// 错误描述
     /// </summary>
     public string? ErrorDescription { get; init; }
+
+    /// <summary>
+    /// 是否成功
+    /// </summary>
+    public bool IsSuccess { get; init; }
 }
 
 /// <summary>
@@ -102,24 +102,19 @@ public class AuthorizationRequest
     public required string ClientId { get; init; }
 
     /// <summary>
-    /// 响应类型
+    /// PKCE Code Challenge
     /// </summary>
-    public required string ResponseType { get; init; }
+    public string? CodeChallenge { get; init; }
 
     /// <summary>
-    /// 重定向 URI
+    /// PKCE Code Challenge Method
     /// </summary>
-    public required string RedirectUri { get; init; }
+    public string? CodeChallengeMethod { get; init; }
 
     /// <summary>
-    /// 作用域
+    /// 登录提示
     /// </summary>
-    public required IEnumerable<string> Scopes { get; init; }
-
-    /// <summary>
-    /// 状态参数
-    /// </summary>
-    public string? State { get; init; }
+    public string? LoginHint { get; init; }
 
     /// <summary>
     /// Nonce
@@ -132,19 +127,24 @@ public class AuthorizationRequest
     public string? Prompt { get; init; }
 
     /// <summary>
-    /// 登录提示
+    /// 重定向 URI
     /// </summary>
-    public string? LoginHint { get; init; }
+    public required string RedirectUri { get; init; }
 
     /// <summary>
-    /// PKCE Code Challenge
+    /// 响应类型
     /// </summary>
-    public string? CodeChallenge { get; init; }
+    public required string ResponseType { get; init; }
 
     /// <summary>
-    /// PKCE Code Challenge Method
+    /// 作用域
     /// </summary>
-    public string? CodeChallengeMethod { get; init; }
+    public required IEnumerable<string> Scopes { get; init; }
+
+    /// <summary>
+    /// 状态参数
+    /// </summary>
+    public string? State { get; init; }
 }
 
 /// <summary>
@@ -153,9 +153,9 @@ public class AuthorizationRequest
 public class AuthorizationResult
 {
     /// <summary>
-    /// 是否成功
+    /// 客户端
     /// </summary>
-    public bool IsSuccess { get; init; }
+    public Client? Client { get; init; }
 
     /// <summary>
     /// 错误信息
@@ -168,14 +168,9 @@ public class AuthorizationResult
     public string? ErrorDescription { get; init; }
 
     /// <summary>
-    /// 授权请求Id
+    /// 是否成功
     /// </summary>
-    public string? RequestId { get; init; }
-
-    /// <summary>
-    /// 客户端
-    /// </summary>
-    public Client? Client { get; init; }
+    public bool IsSuccess { get; init; }
 
     /// <summary>
     /// 请求有效但需要用户交互
@@ -186,6 +181,11 @@ public class AuthorizationResult
     /// 需要登录
     /// </summary>
     public bool NeedsLogin { get; init; }
+
+    /// <summary>
+    /// 授权请求Id
+    /// </summary>
+    public string? RequestId { get; init; }
 }
 
 /// <summary>
@@ -194,14 +194,14 @@ public class AuthorizationResult
 public class ApprovedAuthorizationRequest
 {
     /// <summary>
+    /// Remember Consent
+    /// </summary>
+    public bool RememberConsent { get; init; }
+
+    /// <summary>
     /// 授权请求Id
     /// </summary>
     public required string RequestId { get; init; }
-
-    /// <summary>
-    /// 主题Id
-    /// </summary>
-    public required string SubjectId { get; init; }
 
     /// <summary>
     /// 批准的作用域
@@ -209,9 +209,9 @@ public class ApprovedAuthorizationRequest
     public required IEnumerable<string> Scopes { get; init; }
 
     /// <summary>
-    /// Remember Consent
+    /// 主题Id
     /// </summary>
-    public bool RememberConsent { get; init; }
+    public required string SubjectId { get; init; }
 }
 
 /// <summary>
@@ -219,11 +219,6 @@ public class ApprovedAuthorizationRequest
 /// </summary>
 public class ApprovedAuthorizationResult
 {
-    /// <summary>
-    /// 是否成功
-    /// </summary>
-    public bool IsSuccess { get; init; }
-
     /// <summary>
     /// Authorization Code
     /// </summary>
@@ -238,4 +233,9 @@ public class ApprovedAuthorizationResult
     /// 错误描述
     /// </summary>
     public string? ErrorDescription { get; init; }
+
+    /// <summary>
+    /// 是否成功
+    /// </summary>
+    public bool IsSuccess { get; init; }
 }

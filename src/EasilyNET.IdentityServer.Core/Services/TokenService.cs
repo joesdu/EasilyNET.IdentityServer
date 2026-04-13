@@ -169,9 +169,9 @@ public interface ISigningService
 /// </summary>
 public class SigningKeyResult
 {
-    public SecurityKey Key { get; init; } = default!;
-
     public SigningCredentials Credentials { get; init; } = default!;
+
+    public SecurityKey Key { get; init; } = default!;
 
     public string? KeyId { get; init; }
 }
