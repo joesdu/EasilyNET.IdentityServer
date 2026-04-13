@@ -1,22 +1,50 @@
+using System.Globalization;
 using EasilyNET.IdentityServer.Abstractions.Extensions;
 using EasilyNET.IdentityServer.Abstractions.Services;
 using EasilyNET.IdentityServer.Abstractions.Stores;
 using EasilyNET.IdentityServer.Core.Services;
 using EasilyNET.IdentityServer.Host.Stores;
 using Serilog;
+using Serilog.Events;
+using Serilog.Sinks.SystemConsole.Themes;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 配置 Serilog
-Log.Logger = new LoggerConfiguration()
-             .ReadFrom.Configuration(builder.Configuration)
-             .CreateLogger();
-builder.Host.UseSerilog();
+// 添加Serilog配置
+builder.Host.UseSerilog((hbc, lc) =>
+{
+    var logLevel = hbc.HostingEnvironment.IsDevelopment() ? LogEventLevel.Information : LogEventLevel.Error;
+    lc.ReadFrom.Configuration(hbc.Configuration)
+      .MinimumLevel.Override("Microsoft", logLevel)
+      .MinimumLevel.Override("System", logLevel)
+      // 添加下面这行来过滤掉 Microsoft.Extensions.Resilience 的日志
+      .MinimumLevel.Override("Polly", LogEventLevel.Warning)
+      .MinimumLevel.Override("Microsoft.AspNetCore", logLevel)
+      .MinimumLevel.Override("Microsoft.AspNetCore.Cors.Infrastructure.CorsService", logLevel)
+      .MinimumLevel.Override("Microsoft.AspNetCore.Mvc", logLevel)
+      .MinimumLevel.Override("Microsoft.AspNetCore.Hosting", logLevel)
+      .Enrich.FromLogContext()
+      .WriteTo.Async(wt =>
+      {
+          wt.Console(theme: AnsiConsoleTheme.Code);
+          if (hbc.HostingEnvironment.IsDevelopment())
+          {
+              wt.Debug();
+          }
+          if (hbc.HostingEnvironment.IsProduction())
+          {
+              wt.Map(le => (le.Timestamp.DateTime, le.Level), (key, log) =>
+                  log.Async(o => o.File(Path.Combine(AppContext.BaseDirectory, "logs", key.Level.ToString(), ".log"),
+                      shared: true, formatProvider: CultureInfo.CurrentCulture,
+                      retainedFileTimeLimit: TimeSpan.FromDays(7), rollingInterval: RollingInterval.Day)));
+          }
+      });
+});
 
 // 配置 IdentityServer
 builder.Services.AddIdentityServer(options =>
 {
-    options.Issuer = "https://localhost:5001";
+    options.Issuer = "https://localhost:7020";
     options.AccessTokenLifetime = 3600;
     options.RefreshTokenLifetime = 86400;
     options.AuthorizationCodeLifetime = 300;
