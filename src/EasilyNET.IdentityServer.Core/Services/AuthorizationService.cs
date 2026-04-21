@@ -93,12 +93,28 @@ public class AuthorizationService : IAuthorizationService
                 ErrorDescription = "code_challenge is required"
             };
         }
+        if (!string.IsNullOrEmpty(request.CodeChallengeMethod) && request.CodeChallengeMethod != "S256")
+        {
+            var plainPkceAllowed = _options.AllowPlainTextPkce && client.AllowPlainTextPkce;
+            if (!plainPkceAllowed)
+            {
+                return new()
+                {
+                    IsSuccess = false,
+                    Error = "invalid_request",
+                    ErrorDescription = "Only S256 code_challenge_method is supported"
+                };
+            }
+        }
 
         // 验证 scopes
+        var enabledScopes = (await _resourceStore.FindEnabledScopesAsync(cancellationToken)).Select(x => x.Name)
+            .Concat((await _resourceStore.FindEnabledIdentityResourcesAsync(cancellationToken)).Where(x => x.ShowInDiscoveryDocument).Select(x => x.Name))
+            .ToHashSet(StringComparer.Ordinal);
         var allowedScopes = client.AllowedScopes.ToHashSet();
         foreach (var scope in request.Scopes)
         {
-            if (!allowedScopes.Contains(scope))
+            if (!allowedScopes.Contains(scope) || !enabledScopes.Contains(scope))
             {
                 return new()
                 {
@@ -122,12 +138,43 @@ public class AuthorizationService : IAuthorizationService
     /// <inheritdoc />
     public async Task<ApprovedAuthorizationResult> ApproveAuthorizationRequestAsync(ApprovedAuthorizationRequest request, CancellationToken cancellationToken = default)
     {
+        var client = await _clientStore.FindClientByIdAsync(request.ClientId, cancellationToken);
+        if (client == null || !client.Enabled)
+        {
+            return new()
+            {
+                IsSuccess = false,
+                Error = "invalid_client",
+                ErrorDescription = "Client not found or disabled"
+            };
+        }
+
         // 生成授权码
         var codeBytes = RandomNumberGenerator.GetBytes(32);
         var authorizationCode = Convert.ToBase64String(codeBytes)
                                        .TrimEnd('=')
                                        .Replace('+', '-')
                                        .Replace('/', '_');
+        var scopes = request.Scopes.ToArray();
+
+        await _grantStore.StoreAsync(new()
+        {
+            Key = authorizationCode,
+            Type = "authorization_code",
+            ClientId = client.ClientId,
+            SubjectId = request.SubjectId,
+            CreationTime = DateTime.UtcNow,
+            ExpirationTime = DateTime.UtcNow.AddSeconds(client.AuthorizationCodeLifetime > 0 ? client.AuthorizationCodeLifetime : _options.AuthorizationCodeLifetime),
+            Data = string.Empty,
+            Properties = new Dictionary<string, string>
+            {
+                ["redirect_uri"] = request.RedirectUri,
+                ["scope"] = string.Join(" ", scopes),
+                ["nonce"] = request.Nonce ?? string.Empty,
+                ["code_challenge"] = request.CodeChallenge ?? string.Empty,
+                ["code_challenge_method"] = request.CodeChallengeMethod ?? "S256"
+            }
+        }, cancellationToken);
 
         // 存储 consent (如果需要)
         if (request.RememberConsent && _consentStore != null)
@@ -135,8 +182,8 @@ public class AuthorizationService : IAuthorizationService
             await _consentStore.StoreAsync(new()
             {
                 SubjectId = request.SubjectId,
-                ClientId = request.RequestId, // 这里应该是 clientId，需要从上下文获取
-                Scopes = request.Scopes,
+                ClientId = client.ClientId,
+                Scopes = scopes,
                 CreationTime = DateTime.UtcNow,
                 ExpirationTime = DateTime.UtcNow.AddSeconds(_options.ConsentLifetime)
             }, cancellationToken);

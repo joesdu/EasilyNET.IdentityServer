@@ -18,21 +18,18 @@ public class TokenController : ControllerBase
     private readonly IDeviceFlowStore _deviceFlowStore;
     private readonly IPersistedGrantStore _grantStore;
     private readonly IdentityServerOptions _options;
-    private readonly IResourceStore _resourceStore;
     private readonly ITokenService _tokenService;
 
     public TokenController(
         IClientAuthenticationService clientAuth,
         ITokenService tokenService,
         IPersistedGrantStore grantStore,
-        IResourceStore resourceStore,
         IDeviceFlowStore deviceFlowStore,
         IdentityServerOptions options)
     {
         _clientAuth = clientAuth;
         _tokenService = tokenService;
         _grantStore = grantStore;
-        _resourceStore = resourceStore;
         _deviceFlowStore = deviceFlowStore;
         _options = options;
     }
@@ -69,7 +66,7 @@ public class TokenController : ControllerBase
             return Unauthorized(new TokenErrorResponse(authResult.Error ?? "invalid_client", authResult.ErrorDescription));
         }
         var client = authResult.Client!;
-        return grantType switch
+        var result = grantType switch
         {
             GrantType.ClientCredentials                    => await HandleClientCredentials(client, form, cancellationToken),
             GrantType.AuthorizationCode                    => await HandleAuthorizationCode(client, form, cancellationToken),
@@ -77,6 +74,8 @@ public class TokenController : ControllerBase
             "urn:ietf:params:oauth:grant-type:device_code" => await HandleDeviceCode(client, form, cancellationToken),
             _                                              => BadRequest(new TokenErrorResponse("unsupported_grant_type", $"Grant type '{grantType}' is not supported"))
         };
+        SetSensitiveResponseHeaders();
+        return result;
     }
 
     private async Task<IActionResult> HandleClientCredentials(Client client, IFormCollection form, CancellationToken ct)
@@ -143,10 +142,16 @@ public class TokenController : ControllerBase
                 return BadRequest(new TokenErrorResponse("invalid_grant", "PKCE validation failed"));
             }
         }
+        else if (!string.IsNullOrEmpty(codeVerifier))
+        {
+            return BadRequest(new TokenErrorResponse("invalid_request", "code_verifier must not be included when no code_challenge was used"));
+        }
 
         // 验证 redirect_uri
         var storedRedirectUri = grant.Properties.TryGetValue("redirect_uri", out var sru) ? sru : null;
-        if (!string.IsNullOrEmpty(storedRedirectUri) && storedRedirectUri != redirectUri)
+        if (!string.IsNullOrEmpty(storedRedirectUri) &&
+            !string.Equals(storedRedirectUri, redirectUri, StringComparison.Ordinal) &&
+            !(string.IsNullOrEmpty(redirectUri) && client.RedirectUris.Count() == 1 && client.RedirectUris.Contains(storedRedirectUri, StringComparer.Ordinal)))
         {
             return BadRequest(new TokenErrorResponse("invalid_grant", "redirect_uri mismatch"));
         }
@@ -164,6 +169,7 @@ public class TokenController : ControllerBase
             SubjectId = grant.SubjectId,
             CodeVerifier = codeVerifier
         }, ct);
+        await StoreRefreshTokenGrantAsync(client, grant.SubjectId, scopes, result, ct);
         return Ok(new TokenSuccessResponse(result));
     }
 
@@ -184,10 +190,16 @@ public class TokenController : ControllerBase
             await _grantStore.RemoveAsync(refreshToken, ct);
             return BadRequest(new TokenErrorResponse("invalid_grant", "Refresh token has expired"));
         }
+        var originalScopes = (grant.Properties.TryGetValue("scope", out var originalScopeValue) ? originalScopeValue : null)?.Split(' ', StringSplitOptions.RemoveEmptyEntries) ?? client.AllowedScopes.ToArray();
+        var requestedScope = form["scope"].ToString();
+        var scopes = string.IsNullOrEmpty(requestedScope) ? originalScopes : requestedScope.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (!IsSubset(scopes, originalScopes))
+        {
+            return BadRequest(new TokenErrorResponse("invalid_scope", "Requested scope exceeds the originally granted scope"));
+        }
 
         // Refresh Token 轮换 (OAuth 2.1 要求)
         await _grantStore.RemoveAsync(refreshToken, ct);
-        var scopes = (grant.Properties.TryGetValue("scope", out var scopeStr2) ? scopeStr2 : null)?.Split(' ', StringSplitOptions.RemoveEmptyEntries) ?? client.AllowedScopes.ToArray();
         var result = await _tokenService.CreateAccessTokenAsync(new()
         {
             Client = client,
@@ -197,23 +209,7 @@ public class TokenController : ControllerBase
         }, ct);
 
         // 存储新的 Refresh Token
-        if (result.RefreshToken != null)
-        {
-            await _grantStore.StoreAsync(new()
-            {
-                Key = result.RefreshToken,
-                Type = "refresh_token",
-                ClientId = client.ClientId,
-                SubjectId = grant.SubjectId,
-                CreationTime = DateTime.UtcNow,
-                ExpirationTime = DateTime.UtcNow.AddSeconds(_options.RefreshTokenLifetime),
-                Data = "",
-                Properties = new Dictionary<string, string>
-                {
-                    ["scope"] = string.Join(" ", scopes)
-                }
-            }, ct);
-        }
+        await StoreRefreshTokenGrantAsync(client, grant.SubjectId, scopes, result, ct);
         return Ok(new TokenSuccessResponse(result));
     }
 
@@ -245,6 +241,12 @@ public class TokenController : ControllerBase
         if (deviceCodeData.Data == "consumed")
         {
             return BadRequest(new TokenErrorResponse("invalid_grant", "Device code has already been used"));
+        }
+
+        var pollEvaluation = await EvaluateDevicePollingAsync(deviceCodeData, ct);
+        if (pollEvaluation != null)
+        {
+            return pollEvaluation;
         }
 
         // Check if user has authorized (SubjectId set)
@@ -284,6 +286,90 @@ public class TokenController : ControllerBase
             }
         }
         return requested;
+    }
+
+    private static bool IsSubset(IEnumerable<string> requestedScopes, IEnumerable<string> grantedScopes)
+    {
+        var granted = grantedScopes.ToHashSet(StringComparer.Ordinal);
+        foreach (var scope in requestedScopes)
+        {
+            if (!granted.Contains(scope))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private async Task<IActionResult?> EvaluateDevicePollingAsync(DeviceCodeData deviceCodeData, CancellationToken ct)
+    {
+        var interval = ReadDevicePollingInterval(deviceCodeData);
+        if (deviceCodeData.Properties.TryGetValue("last_poll_utc", out var lastPollValue) &&
+            DateTime.TryParse(lastPollValue, null, System.Globalization.DateTimeStyles.RoundtripKind, out var lastPollUtc))
+        {
+            var elapsed = DateTime.UtcNow - lastPollUtc;
+            if (elapsed < TimeSpan.FromSeconds(interval))
+            {
+                var increasedInterval = interval + DeviceAuthorizationController.SlowDownStepSeconds;
+                await PersistDevicePollingStateAsync(deviceCodeData, DateTime.UtcNow, increasedInterval, ct);
+                return BadRequest(new TokenErrorResponse("slow_down", "The client is polling too quickly"));
+            }
+        }
+
+        await PersistDevicePollingStateAsync(deviceCodeData, DateTime.UtcNow, interval, ct);
+        return null;
+    }
+
+    private async Task PersistDevicePollingStateAsync(DeviceCodeData deviceCodeData, DateTime lastPollUtc, int intervalSeconds, CancellationToken ct)
+    {
+        var updatedProperties = new Dictionary<string, string>(deviceCodeData.Properties)
+        {
+            ["last_poll_utc"] = lastPollUtc.ToString("O"),
+            ["interval_seconds"] = intervalSeconds.ToString()
+        };
+        await _deviceFlowStore.StoreAsync(new DeviceCodeData
+        {
+            Code = deviceCodeData.Code,
+            UserCode = deviceCodeData.UserCode,
+            SubjectId = deviceCodeData.SubjectId,
+            ClientId = deviceCodeData.ClientId,
+            Description = deviceCodeData.Description,
+            CreationTime = deviceCodeData.CreationTime,
+            ExpirationTime = deviceCodeData.ExpirationTime,
+            Data = deviceCodeData.Data,
+            Properties = updatedProperties
+        }, ct);
+    }
+
+    private static int ReadDevicePollingInterval(DeviceCodeData deviceCodeData)
+    {
+        return deviceCodeData.Properties.TryGetValue("interval_seconds", out var intervalValue) &&
+               int.TryParse(intervalValue, out var parsedInterval) &&
+               parsedInterval > 0
+            ? parsedInterval
+            : DeviceAuthorizationController.DefaultPollingIntervalSeconds;
+    }
+
+    private Task StoreRefreshTokenGrantAsync(Client client, string? subjectId, IEnumerable<string> scopes, TokenResult result, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(result.RefreshToken))
+        {
+            return Task.CompletedTask;
+        }
+        return _grantStore.StoreAsync(new()
+        {
+            Key = result.RefreshToken,
+            Type = "refresh_token",
+            ClientId = client.ClientId,
+            SubjectId = subjectId,
+            CreationTime = DateTime.UtcNow,
+            ExpirationTime = DateTime.UtcNow.AddSeconds(client.RefreshTokenLifetime > 0 ? client.RefreshTokenLifetime : _options.RefreshTokenLifetime),
+            Data = "",
+            Properties = new Dictionary<string, string>
+            {
+                ["scope"] = string.Join(" ", scopes)
+            }
+        }, ct);
     }
 
     private (string? clientId, string? clientSecret) ExtractClientCredentials(IFormCollection form)
@@ -327,6 +413,12 @@ public class TokenController : ControllerBase
                .TrimEnd('=')
                .Replace('+', '-')
                .Replace('/', '_');
+
+    private void SetSensitiveResponseHeaders()
+    {
+        Response.Headers.CacheControl = "no-store";
+        Response.Headers.Pragma = "no-cache";
+    }
 }
 
 /// <summary>

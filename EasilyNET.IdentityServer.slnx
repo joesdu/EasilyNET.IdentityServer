@@ -1,7 +1,5 @@
 <Solution>
-  <Folder Name="/sample/">
-    <Project Path="src/EasilyNET.IdentityServer.Host/EasilyNET.IdentityServer.Host.csproj" />
-  </Folder>
+  <Folder Name="/sample/" />
   <Folder Name="/Solution Items/">
     <File Path="Directory.Build.props" />
     <File Path="draft-ietf-oauth-v2-1-15.txt" />
@@ -22,6 +20,7 @@
     <Project Path="src/EasilyNET.IdentityServer.DataAccess.EFCore.SqlServer/EasilyNET.IdentityServer.DataAccess.EFCore.SqlServer.csproj" />
     <Project Path="src/EasilyNET.IdentityServer.DataAccess.EFCore/EasilyNET.IdentityServer.DataAccess.EFCore.csproj" />
     <Project Path="src/EasilyNET.IdentityServer.DataAccess.MongoDB/EasilyNET.IdentityServer.DataAccess.MongoDB.csproj" />
+    <Project Path="src/EasilyNET.IdentityServer.Host/EasilyNET.IdentityServer.Host.csproj" />
   </Folder>
   <Folder Name="/test/">
     <File Path="tests/Directory.Packages.props" />

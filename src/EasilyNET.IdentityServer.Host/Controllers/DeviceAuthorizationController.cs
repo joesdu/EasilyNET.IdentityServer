@@ -12,6 +12,9 @@ namespace EasilyNET.IdentityServer.Host.Controllers;
 [ApiController]
 public class DeviceAuthorizationController : ControllerBase
 {
+    internal const int DefaultPollingIntervalSeconds = 5;
+    internal const int SlowDownStepSeconds = 5;
+
     private readonly IClientStore _clientStore;
     private readonly IDeviceFlowStore _deviceFlowStore;
     private readonly IdentityServerOptions _options;
@@ -76,7 +79,8 @@ public class DeviceAuthorizationController : ControllerBase
             Data = string.Join(" ", requestedScopes),
             Properties = new Dictionary<string, string>
             {
-                ["scope"] = string.Join(" ", requestedScopes)
+                ["scope"] = string.Join(" ", requestedScopes),
+                ["interval_seconds"] = DefaultPollingIntervalSeconds.ToString(),
             }
         };
         await _deviceFlowStore.StoreAsync(deviceCodeData, ct);
@@ -88,7 +92,7 @@ public class DeviceAuthorizationController : ControllerBase
             verification_uri = $"{issuer}/device",
             verification_uri_complete = $"{issuer}/device?user_code={userCode}",
             expires_in = lifetime,
-            interval = 5
+            interval = DefaultPollingIntervalSeconds
         });
     }
 

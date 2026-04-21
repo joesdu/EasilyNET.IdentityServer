@@ -194,6 +194,26 @@ public class AuthorizationResult
 public class ApprovedAuthorizationRequest
 {
     /// <summary>
+    /// 客户端Id
+    /// </summary>
+    public required string ClientId { get; init; }
+
+    /// <summary>
+    /// PKCE Code Challenge
+    /// </summary>
+    public string? CodeChallenge { get; init; }
+
+    /// <summary>
+    /// PKCE Code Challenge Method
+    /// </summary>
+    public string? CodeChallengeMethod { get; init; }
+
+    /// <summary>
+    /// Nonce
+    /// </summary>
+    public string? Nonce { get; init; }
+
+    /// <summary>
     /// Remember Consent
     /// </summary>
     public bool RememberConsent { get; init; }
@@ -207,6 +227,11 @@ public class ApprovedAuthorizationRequest
     /// 批准的作用域
     /// </summary>
     public required IEnumerable<string> Scopes { get; init; }
+
+    /// <summary>
+    /// 重定向 URI
+    /// </summary>
+    public required string RedirectUri { get; init; }
 
     /// <summary>
     /// 主题Id

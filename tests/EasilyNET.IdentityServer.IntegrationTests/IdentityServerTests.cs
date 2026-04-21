@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Security.Cryptography;
 using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace EasilyNET.IdentityServer.IntegrationTests;
@@ -15,7 +16,10 @@ public class IdentityServerTests
     {
         var factory = new WebApplicationFactory<Program>()
             .WithWebHostBuilder(builder => builder.UseSetting("ASPNETCORE_ENVIRONMENT", "Development"));
-        _client = factory.CreateClient();
+        _client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
     }
 
     private static HttpRequestMessage PostForm(string url, Dictionary<string, string> form, string? basicAuth = null)
@@ -30,6 +34,30 @@ public class IdentityServerTests
                 Convert.ToBase64String(Encoding.UTF8.GetBytes(basicAuth)));
         }
         return request;
+    }
+
+    private static string CreateCodeVerifier() => Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
+        .TrimEnd('=')
+        .Replace('+', '-')
+        .Replace('/', '_');
+
+    private static string CreateCodeChallenge(string verifier)
+    {
+        var hash = SHA256.HashData(Encoding.ASCII.GetBytes(verifier));
+        return Convert.ToBase64String(hash)
+            .TrimEnd('=')
+            .Replace('+', '-')
+            .Replace('/', '_');
+    }
+
+    private static Uri GetAuthorizationResponseUri(HttpResponseMessage response)
+    {
+        if (response.Headers.Location is not null)
+        {
+            return response.Headers.Location;
+        }
+        Assert.IsNotNull(response.RequestMessage?.RequestUri);
+        return response.RequestMessage!.RequestUri!;
     }
 
     #region Revocation
@@ -55,6 +83,16 @@ public class IdentityServerTests
             ["token"] = accessToken
         }, "console:secret"));
         response.EnsureSuccessStatusCode();
+    }
+
+    [TestMethod]
+    public async Task Revocation_InvalidClientSecret_ReturnsUnauthorized()
+    {
+        var response = await _client.SendAsync(PostForm("/connect/revocation", new()
+        {
+            ["token"] = "any-token"
+        }, "console:wrong-secret"));
+        Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
     #endregion
@@ -94,6 +132,8 @@ public class IdentityServerTests
         Assert.IsTrue(grants.Contains("client_credentials"));
         Assert.IsTrue(grants.Contains("refresh_token"));
         Assert.IsTrue(grants.Contains("urn:ietf:params:oauth:grant-type:device_code"));
+        var authMethods = root.GetProperty("token_endpoint_auth_methods_supported").EnumerateArray().Select(e => e.GetString()).ToList();
+        Assert.IsTrue(authMethods.Contains("none"));
     }
 
     [TestMethod]
@@ -211,6 +251,198 @@ public class IdentityServerTests
 
     #endregion
 
+    #region Authorization Code
+
+    [TestMethod]
+    public async Task AuthorizationCode_FullFlow_ReturnsAccessAndRefreshToken()
+    {
+        var verifier = CreateCodeVerifier();
+        var challenge = CreateCodeChallenge(verifier);
+        var authorizeResponse = await _client.GetAsync($"/connect/authorize?response_type=code&client_id=mvc&redirect_uri={Uri.EscapeDataString("https://localhost:5002/signin-oidc")}&scope=openid%20profile%20api1&code_challenge={challenge}&code_challenge_method=S256&subject_id=test-user");
+
+        var location = GetAuthorizationResponseUri(authorizeResponse);
+        var query = System.Web.HttpUtility.ParseQueryString(location.Query);
+        var code = query["code"];
+        Assert.IsFalse(string.IsNullOrEmpty(code));
+        Assert.AreEqual("https://localhost:7020", query["iss"]);
+
+        var tokenResponse = await _client.SendAsync(PostForm("/connect/token", new()
+        {
+            ["grant_type"] = "authorization_code",
+            ["client_id"] = "mvc",
+            ["client_secret"] = "secret",
+            ["code"] = code!,
+            ["code_verifier"] = verifier
+        }));
+
+        tokenResponse.EnsureSuccessStatusCode();
+        Assert.AreEqual("no-store", tokenResponse.Headers.CacheControl?.ToString());
+        var json = await JsonDocument.ParseAsync(await tokenResponse.Content.ReadAsStreamAsync());
+        Assert.IsTrue(json.RootElement.TryGetProperty("access_token", out _));
+        Assert.IsTrue(json.RootElement.TryGetProperty("refresh_token", out var refreshToken));
+        Assert.IsFalse(string.IsNullOrEmpty(refreshToken.GetString()));
+    }
+
+    [TestMethod]
+    public async Task AuthorizationCode_MissingState_IsAllowed()
+    {
+        var verifier = CreateCodeVerifier();
+        var challenge = CreateCodeChallenge(verifier);
+        var response = await _client.GetAsync($"/connect/authorize?response_type=code&client_id=spa&redirect_uri={Uri.EscapeDataString("http://localhost:3000/callback")}&scope=openid%20profile%20api1&code_challenge={challenge}&code_challenge_method=S256&subject_id=test-user");
+
+        var query = System.Web.HttpUtility.ParseQueryString(GetAuthorizationResponseUri(response).Query);
+        Assert.IsFalse(string.IsNullOrEmpty(query["code"]));
+        Assert.IsNull(query["state"]);
+        Assert.AreEqual("https://localhost:7020", query["iss"]);
+    }
+
+    [TestMethod]
+    public async Task AuthorizationCode_WithWrongVerifier_ReturnsInvalidGrant()
+    {
+        var verifier = CreateCodeVerifier();
+        var challenge = CreateCodeChallenge(verifier);
+        var authorizeResponse = await _client.GetAsync($"/connect/authorize?response_type=code&client_id=mvc&redirect_uri={Uri.EscapeDataString("https://localhost:5002/signin-oidc")}&scope=openid%20profile%20api1&state=abc&code_challenge={challenge}&code_challenge_method=S256&subject_id=test-user");
+        var query = System.Web.HttpUtility.ParseQueryString(GetAuthorizationResponseUri(authorizeResponse).Query);
+
+        var tokenResponse = await _client.SendAsync(PostForm("/connect/token", new()
+        {
+            ["grant_type"] = "authorization_code",
+            ["client_id"] = "mvc",
+            ["client_secret"] = "secret",
+            ["code"] = query["code"]!,
+            ["code_verifier"] = "wrong-verifier"
+        }));
+
+        Assert.AreEqual(HttpStatusCode.BadRequest, tokenResponse.StatusCode);
+        var body = await JsonDocument.ParseAsync(await tokenResponse.Content.ReadAsStreamAsync());
+        Assert.AreEqual("invalid_grant", body.RootElement.GetProperty("error").GetString());
+    }
+
+    [TestMethod]
+    public async Task Authorization_InvalidScope_RedirectsWithIssuerAndError()
+    {
+        var verifier = CreateCodeVerifier();
+        var challenge = CreateCodeChallenge(verifier);
+        var response = await _client.GetAsync($"/connect/authorize?response_type=code&client_id=mvc&redirect_uri={Uri.EscapeDataString("https://localhost:5002/signin-oidc")}&scope=openid%20missing&state=bad-scope&code_challenge={challenge}&code_challenge_method=S256&subject_id=test-user");
+
+        var query = System.Web.HttpUtility.ParseQueryString(GetAuthorizationResponseUri(response).Query);
+        Assert.AreEqual("invalid_scope", query["error"]);
+        Assert.AreEqual("bad-scope", query["state"]);
+        Assert.AreEqual("https://localhost:7020", query["iss"]);
+    }
+
+    [TestMethod]
+    public async Task RefreshToken_RotatesAndOldTokenBecomesInvalid()
+    {
+        var verifier = CreateCodeVerifier();
+        var challenge = CreateCodeChallenge(verifier);
+        var authorizeResponse = await _client.GetAsync($"/connect/authorize?response_type=code&client_id=mvc&redirect_uri={Uri.EscapeDataString("https://localhost:5002/signin-oidc")}&scope=openid%20profile%20api1&state=xyz&code_challenge={challenge}&code_challenge_method=S256&subject_id=test-user");
+        var query = System.Web.HttpUtility.ParseQueryString(GetAuthorizationResponseUri(authorizeResponse).Query);
+
+        var exchangeResponse = await _client.SendAsync(PostForm("/connect/token", new()
+        {
+            ["grant_type"] = "authorization_code",
+            ["client_id"] = "mvc",
+            ["client_secret"] = "secret",
+            ["code"] = query["code"]!,
+            ["code_verifier"] = verifier
+        }));
+        exchangeResponse.EnsureSuccessStatusCode();
+        var tokenJson = await JsonDocument.ParseAsync(await exchangeResponse.Content.ReadAsStreamAsync());
+        var refreshToken = tokenJson.RootElement.GetProperty("refresh_token").GetString()!;
+
+        var refreshResponse = await _client.SendAsync(PostForm("/connect/token", new()
+        {
+            ["grant_type"] = "refresh_token",
+            ["client_id"] = "mvc",
+            ["client_secret"] = "secret",
+            ["refresh_token"] = refreshToken
+        }));
+        refreshResponse.EnsureSuccessStatusCode();
+        var refreshedJson = await JsonDocument.ParseAsync(await refreshResponse.Content.ReadAsStreamAsync());
+        var rotatedRefreshToken = refreshedJson.RootElement.GetProperty("refresh_token").GetString()!;
+        Assert.AreNotEqual(refreshToken, rotatedRefreshToken);
+
+        var oldRefreshResponse = await _client.SendAsync(PostForm("/connect/token", new()
+        {
+            ["grant_type"] = "refresh_token",
+            ["client_id"] = "mvc",
+            ["client_secret"] = "secret",
+            ["refresh_token"] = refreshToken
+        }));
+        Assert.AreEqual(HttpStatusCode.BadRequest, oldRefreshResponse.StatusCode);
+    }
+
+    [TestMethod]
+    public async Task RefreshToken_CanRequestNarrowerScope()
+    {
+        var verifier = CreateCodeVerifier();
+        var challenge = CreateCodeChallenge(verifier);
+        var authorizeResponse = await _client.GetAsync($"/connect/authorize?response_type=code&client_id=mvc&redirect_uri={Uri.EscapeDataString("https://localhost:5002/signin-oidc")}&scope=openid%20profile%20api1&state=narrow&code_challenge={challenge}&code_challenge_method=S256&subject_id=test-user");
+        var query = System.Web.HttpUtility.ParseQueryString(GetAuthorizationResponseUri(authorizeResponse).Query);
+
+        var exchangeResponse = await _client.SendAsync(PostForm("/connect/token", new()
+        {
+            ["grant_type"] = "authorization_code",
+            ["client_id"] = "mvc",
+            ["client_secret"] = "secret",
+            ["code"] = query["code"]!,
+            ["code_verifier"] = verifier
+        }));
+        exchangeResponse.EnsureSuccessStatusCode();
+        var tokenJson = await JsonDocument.ParseAsync(await exchangeResponse.Content.ReadAsStreamAsync());
+        var refreshToken = tokenJson.RootElement.GetProperty("refresh_token").GetString()!;
+
+        var refreshResponse = await _client.SendAsync(PostForm("/connect/token", new()
+        {
+            ["grant_type"] = "refresh_token",
+            ["client_id"] = "mvc",
+            ["client_secret"] = "secret",
+            ["refresh_token"] = refreshToken,
+            ["scope"] = "openid api1"
+        }));
+
+        refreshResponse.EnsureSuccessStatusCode();
+        var refreshedJson = await JsonDocument.ParseAsync(await refreshResponse.Content.ReadAsStreamAsync());
+        Assert.AreEqual("openid api1", refreshedJson.RootElement.GetProperty("scope").GetString());
+    }
+
+    [TestMethod]
+    public async Task RefreshToken_CannotExpandScope()
+    {
+        var verifier = CreateCodeVerifier();
+        var challenge = CreateCodeChallenge(verifier);
+        var authorizeResponse = await _client.GetAsync($"/connect/authorize?response_type=code&client_id=mvc&redirect_uri={Uri.EscapeDataString("https://localhost:5002/signin-oidc")}&scope=openid%20api1&state=expand&code_challenge={challenge}&code_challenge_method=S256&subject_id=test-user");
+        var query = System.Web.HttpUtility.ParseQueryString(GetAuthorizationResponseUri(authorizeResponse).Query);
+
+        var exchangeResponse = await _client.SendAsync(PostForm("/connect/token", new()
+        {
+            ["grant_type"] = "authorization_code",
+            ["client_id"] = "mvc",
+            ["client_secret"] = "secret",
+            ["code"] = query["code"]!,
+            ["code_verifier"] = verifier
+        }));
+        exchangeResponse.EnsureSuccessStatusCode();
+        var tokenJson = await JsonDocument.ParseAsync(await exchangeResponse.Content.ReadAsStreamAsync());
+        var refreshToken = tokenJson.RootElement.GetProperty("refresh_token").GetString()!;
+
+        var refreshResponse = await _client.SendAsync(PostForm("/connect/token", new()
+        {
+            ["grant_type"] = "refresh_token",
+            ["client_id"] = "mvc",
+            ["client_secret"] = "secret",
+            ["refresh_token"] = refreshToken,
+            ["scope"] = "openid profile api1"
+        }));
+
+        Assert.AreEqual(HttpStatusCode.BadRequest, refreshResponse.StatusCode);
+        var errorJson = await JsonDocument.ParseAsync(await refreshResponse.Content.ReadAsStreamAsync());
+        Assert.AreEqual("invalid_scope", errorJson.RootElement.GetProperty("error").GetString());
+    }
+
+    #endregion
+
     #region Introspection
 
     [TestMethod]
@@ -239,6 +471,16 @@ public class IdentityServerTests
     }
 
     [TestMethod]
+    public async Task Introspection_InvalidClientSecret_ReturnsUnauthorized()
+    {
+        var response = await _client.SendAsync(PostForm("/connect/introspect", new()
+        {
+            ["token"] = "any-token"
+        }, "console:wrong-secret"));
+        Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [TestMethod]
     public async Task Introspection_InvalidToken_ReturnsInactive()
     {
         var response = await _client.SendAsync(PostForm("/connect/introspect", new()
@@ -248,6 +490,35 @@ public class IdentityServerTests
         response.EnsureSuccessStatusCode();
         var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
         Assert.IsFalse(json.RootElement.GetProperty("active").GetBoolean());
+    }
+
+    [TestMethod]
+    public async Task Introspection_RevokedToken_ReturnsInactive()
+    {
+        var tokenResponse = await _client.SendAsync(PostForm("/connect/token", new()
+        {
+            ["grant_type"] = "client_credentials",
+            ["client_id"] = "console",
+            ["client_secret"] = "secret",
+            ["scope"] = "api1"
+        }));
+        tokenResponse.EnsureSuccessStatusCode();
+        var tokenJson = await JsonDocument.ParseAsync(await tokenResponse.Content.ReadAsStreamAsync());
+        var accessToken = tokenJson.RootElement.GetProperty("access_token").GetString()!;
+
+        var revokeResponse = await _client.SendAsync(PostForm("/connect/revocation", new()
+        {
+            ["token"] = accessToken
+        }, "console:secret"));
+        revokeResponse.EnsureSuccessStatusCode();
+
+        var introspectResponse = await _client.SendAsync(PostForm("/connect/introspect", new()
+        {
+            ["token"] = accessToken
+        }, "console:secret"));
+        introspectResponse.EnsureSuccessStatusCode();
+        var introspection = await JsonDocument.ParseAsync(await introspectResponse.Content.ReadAsStreamAsync());
+        Assert.IsFalse(introspection.RootElement.GetProperty("active").GetBoolean());
     }
 
     #endregion
@@ -308,6 +579,39 @@ public class IdentityServerTests
         Assert.AreEqual(HttpStatusCode.BadRequest, tokenResponse.StatusCode);
         var errorJson = await JsonDocument.ParseAsync(await tokenResponse.Content.ReadAsStreamAsync());
         Assert.AreEqual("authorization_pending", errorJson.RootElement.GetProperty("error").GetString());
+    }
+
+    [TestMethod]
+    public async Task DeviceCode_PollingTooQuickly_ReturnsSlowDown()
+    {
+        var authResponse = await _client.SendAsync(PostForm("/connect/device_authorization", new()
+        {
+            ["client_id"] = "device",
+            ["scope"] = "openid api1"
+        }));
+        authResponse.EnsureSuccessStatusCode();
+        var authJson = await JsonDocument.ParseAsync(await authResponse.Content.ReadAsStreamAsync());
+        var deviceCode = authJson.RootElement.GetProperty("device_code").GetString()!;
+
+        var firstPollResponse = await _client.SendAsync(PostForm("/connect/token", new()
+        {
+            ["grant_type"] = "urn:ietf:params:oauth:grant-type:device_code",
+            ["client_id"] = "device",
+            ["device_code"] = deviceCode
+        }));
+        Assert.AreEqual(HttpStatusCode.BadRequest, firstPollResponse.StatusCode);
+        var firstErrorJson = await JsonDocument.ParseAsync(await firstPollResponse.Content.ReadAsStreamAsync());
+        Assert.AreEqual("authorization_pending", firstErrorJson.RootElement.GetProperty("error").GetString());
+
+        var secondPollResponse = await _client.SendAsync(PostForm("/connect/token", new()
+        {
+            ["grant_type"] = "urn:ietf:params:oauth:grant-type:device_code",
+            ["client_id"] = "device",
+            ["device_code"] = deviceCode
+        }));
+        Assert.AreEqual(HttpStatusCode.BadRequest, secondPollResponse.StatusCode);
+        var secondErrorJson = await JsonDocument.ParseAsync(await secondPollResponse.Content.ReadAsStreamAsync());
+        Assert.AreEqual("slow_down", secondErrorJson.RootElement.GetProperty("error").GetString());
     }
 
     [TestMethod]

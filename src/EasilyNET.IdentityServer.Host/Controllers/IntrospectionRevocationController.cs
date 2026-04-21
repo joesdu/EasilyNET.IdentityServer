@@ -1,4 +1,5 @@
 using System.Text;
+using EasilyNET.IdentityServer.Abstractions.Models;
 using EasilyNET.IdentityServer.Abstractions.Services;
 using EasilyNET.IdentityServer.Abstractions.Stores;
 using Microsoft.AspNetCore.Mvc;
@@ -11,13 +12,13 @@ namespace EasilyNET.IdentityServer.Host.Controllers;
 [ApiController]
 public class IntrospectionController : ControllerBase
 {
-    private readonly IClientStore _clientStore;
+    private readonly IClientAuthenticationService _clientAuthenticationService;
     private readonly ITokenService _tokenService;
 
-    public IntrospectionController(ITokenService tokenService, IClientStore clientStore)
+    public IntrospectionController(ITokenService tokenService, IClientAuthenticationService clientAuthenticationService)
     {
         _tokenService = tokenService;
-        _clientStore = clientStore;
+        _clientAuthenticationService = clientAuthenticationService;
     }
 
     /// <summary>
@@ -26,18 +27,12 @@ public class IntrospectionController : ControllerBase
     [HttpPost("/connect/introspect")]
     public async Task<IActionResult> Introspect(CancellationToken cancellationToken)
     {
-        // 验证调用方身份 (必须是已注册的客户端)
-        var (clientId, clientSecret) = ExtractClientCredentials();
-        if (string.IsNullOrEmpty(clientId))
-        {
-            return Unauthorized(new { error = "invalid_client" });
-        }
-        var client = await _clientStore.FindClientByIdAsync(clientId, cancellationToken);
-        if (client == null || !client.Enabled)
-        {
-            return Unauthorized(new { error = "invalid_client" });
-        }
         var form = await Request.ReadFormAsync(cancellationToken);
+        var authResult = await AuthenticateClientAsync(form, cancellationToken);
+        if (!authResult.IsSuccess)
+        {
+            return Unauthorized(new { error = "invalid_client" });
+        }
         var token = form["token"].ToString();
         if (string.IsNullOrEmpty(token))
         {
@@ -61,7 +56,22 @@ public class IntrospectionController : ControllerBase
         });
     }
 
-    private (string? clientId, string? clientSecret) ExtractClientCredentials()
+    private Task<ClientAuthenticationResult> AuthenticateClientAsync(IFormCollection form, CancellationToken cancellationToken)
+    {
+        var (clientId, clientSecret) = ExtractClientCredentials(form);
+        if (string.IsNullOrEmpty(clientId))
+        {
+            return Task.FromResult(new ClientAuthenticationResult { IsSuccess = false });
+        }
+        return _clientAuthenticationService.AuthenticateClientAsync(new()
+        {
+            ClientId = clientId,
+            ClientSecret = clientSecret,
+            GrantType = GrantType.ClientCredentials
+        }, cancellationToken);
+    }
+
+    private (string? clientId, string? clientSecret) ExtractClientCredentials(IFormCollection form)
     {
         var authHeader = Request.Headers.Authorization.ToString();
         if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
@@ -74,7 +84,7 @@ public class IntrospectionController : ControllerBase
                 return (Uri.UnescapeDataString(parts[0]), Uri.UnescapeDataString(parts[1]));
             }
         }
-        return (null, null);
+        return (form["client_id"].ToString(), form["client_secret"].ToString());
     }
 }
 
@@ -84,15 +94,15 @@ public class IntrospectionController : ControllerBase
 [ApiController]
 public class RevocationController : ControllerBase
 {
-    private readonly IClientStore _clientStore;
+    private readonly IClientAuthenticationService _clientAuthenticationService;
     private readonly IPersistedGrantStore _grantStore;
     private readonly ITokenService _tokenService;
 
-    public RevocationController(ITokenService tokenService, IPersistedGrantStore grantStore, IClientStore clientStore)
+    public RevocationController(ITokenService tokenService, IPersistedGrantStore grantStore, IClientAuthenticationService clientAuthenticationService)
     {
         _tokenService = tokenService;
         _grantStore = grantStore;
-        _clientStore = clientStore;
+        _clientAuthenticationService = clientAuthenticationService;
     }
 
     /// <summary>
@@ -101,18 +111,13 @@ public class RevocationController : ControllerBase
     [HttpPost("/connect/revocation")]
     public async Task<IActionResult> Revoke(CancellationToken cancellationToken)
     {
-        // 验证调用方身份
-        var (clientId, clientSecret) = ExtractClientCredentials();
-        if (string.IsNullOrEmpty(clientId))
-        {
-            return Unauthorized(new { error = "invalid_client" });
-        }
-        var client = await _clientStore.FindClientByIdAsync(clientId, cancellationToken);
-        if (client == null || !client.Enabled)
-        {
-            return Unauthorized(new { error = "invalid_client" });
-        }
         var form = await Request.ReadFormAsync(cancellationToken);
+        var authResult = await AuthenticateClientAsync(form, cancellationToken);
+        if (!authResult.IsSuccess)
+        {
+            return Unauthorized(new { error = "invalid_client" });
+        }
+        var clientId = authResult.Client!.ClientId;
         var token = form["token"].ToString();
         var tokenTypeHint = form["token_type_hint"].ToString();
         if (string.IsNullOrEmpty(token))
@@ -141,7 +146,22 @@ public class RevocationController : ControllerBase
         return Ok();
     }
 
-    private (string? clientId, string? clientSecret) ExtractClientCredentials()
+    private Task<ClientAuthenticationResult> AuthenticateClientAsync(IFormCollection form, CancellationToken cancellationToken)
+    {
+        var (clientId, clientSecret) = ExtractClientCredentials(form);
+        if (string.IsNullOrEmpty(clientId))
+        {
+            return Task.FromResult(new ClientAuthenticationResult { IsSuccess = false });
+        }
+        return _clientAuthenticationService.AuthenticateClientAsync(new()
+        {
+            ClientId = clientId,
+            ClientSecret = clientSecret,
+            GrantType = GrantType.ClientCredentials
+        }, cancellationToken);
+    }
+
+    private (string? clientId, string? clientSecret) ExtractClientCredentials(IFormCollection form)
     {
         var authHeader = Request.Headers.Authorization.ToString();
         if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
@@ -154,6 +174,6 @@ public class RevocationController : ControllerBase
                 return (Uri.UnescapeDataString(parts[0]), Uri.UnescapeDataString(parts[1]));
             }
         }
-        return (null, null);
+        return (form["client_id"].ToString(), form["client_secret"].ToString());
     }
 }

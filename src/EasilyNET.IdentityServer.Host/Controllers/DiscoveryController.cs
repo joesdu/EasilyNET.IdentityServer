@@ -1,4 +1,5 @@
 using EasilyNET.IdentityServer.Abstractions.Extensions;
+using EasilyNET.IdentityServer.Abstractions.Models;
 using EasilyNET.IdentityServer.Abstractions.Stores;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,13 +11,15 @@ namespace EasilyNET.IdentityServer.Host.Controllers;
 [ApiController]
 public class DiscoveryController : ControllerBase
 {
+    private readonly IClientStore _clientStore;
     private readonly IdentityServerOptions _options;
     private readonly IResourceStore _resourceStore;
 
-    public DiscoveryController(IdentityServerOptions options, IResourceStore resourceStore)
+    public DiscoveryController(IdentityServerOptions options, IResourceStore resourceStore, IClientStore clientStore)
     {
         _options = options;
         _resourceStore = resourceStore;
+        _clientStore = clientStore;
     }
 
     /// <summary>
@@ -28,6 +31,16 @@ public class DiscoveryController : ControllerBase
         var issuer = _options.Issuer.TrimEnd('/');
         var scopes = await _resourceStore.FindEnabledScopesAsync(cancellationToken);
         var identityResources = await _resourceStore.FindEnabledIdentityResourcesAsync(cancellationToken);
+        var clients = await _clientStore.FindEnabledClientsAsync(cancellationToken);
+        var tokenEndpointAuthMethods = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "client_secret_basic",
+            "client_secret_post"
+        };
+        if (clients.Any(x => x.ClientType == ClientType.Public || !x.RequireClientSecret))
+        {
+            tokenEndpointAuthMethods.Add("none");
+        }
         var scopeNames = scopes.Select(s => s.Name)
                                .Concat(identityResources.Select(r => r.Name))
                                .Distinct()
@@ -45,7 +58,7 @@ public class DiscoveryController : ControllerBase
             ["response_types_supported"] = new[] { "code" },
             ["response_modes_supported"] = new[] { "query", "fragment", "form_post" },
             ["grant_types_supported"] = new[] { "authorization_code", "client_credentials", "refresh_token", "urn:ietf:params:oauth:grant-type:device_code" },
-            ["token_endpoint_auth_methods_supported"] = new[] { "client_secret_basic", "client_secret_post" },
+            ["token_endpoint_auth_methods_supported"] = tokenEndpointAuthMethods.ToArray(),
             ["subject_types_supported"] = new[] { "public" },
             ["id_token_signing_alg_values_supported"] = new[] { "HS256", "RS256" },
             ["code_challenge_methods_supported"] = new[] { "S256" },

@@ -1,6 +1,7 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using System.Collections.Concurrent;
 using EasilyNET.IdentityServer.Abstractions.Extensions;
 using EasilyNET.IdentityServer.Abstractions.Models;
 using EasilyNET.IdentityServer.Abstractions.Services;
@@ -19,6 +20,7 @@ public class TokenService : ITokenService
 {
     private readonly ILogger<TokenService> _logger;
     private readonly IdentityServerOptions _options;
+    private readonly ConcurrentDictionary<string, DateTime> _revokedTokens = new(StringComparer.Ordinal);
     private readonly ISerializationService _serialization;
     private readonly ISigningService _signingService;
 
@@ -42,11 +44,18 @@ public class TokenService : ITokenService
         var expires = now.AddSeconds(_options.AccessTokenLifetime);
         var claims = new List<Claim>
         {
-            new(JwtRegisteredClaimNames.Sub, request.SubjectId ?? ""),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
             new(JwtRegisteredClaimNames.Iat, EpochTime.GetIntDate(now).ToString(), ClaimValueTypes.Integer64),
             new("client_id", request.Client.ClientId)
         };
+        if (!string.IsNullOrEmpty(request.SubjectId))
+        {
+            claims.Add(new(JwtRegisteredClaimNames.Sub, request.SubjectId));
+        }
+        foreach (var scope in request.Scopes.Distinct(StringComparer.Ordinal))
+        {
+            claims.Add(new("scope", scope));
+        }
 
         // 添加请求的 Claims
         if (request.Claims != null)
@@ -68,7 +77,7 @@ public class TokenService : ITokenService
         var tokenHandler = new JwtSecurityTokenHandler();
         var token = tokenHandler.CreateToken(tokenDescriptor);
         var accessToken = tokenHandler.WriteToken(token);
-        var refreshToken = request.GrantType == GrantType.AuthorizationCode
+        var refreshToken = ShouldIssueRefreshToken(request)
                                ? Guid.NewGuid().ToString("N")
                                : null;
         return new()
@@ -93,6 +102,15 @@ public class TokenService : ITokenService
     {
         try
         {
+            if (_revokedTokens.ContainsKey(token))
+            {
+                return new()
+                {
+                    IsValid = false,
+                    Error = "invalid_token",
+                    ErrorDescription = "Token has been revoked"
+                };
+            }
             var signingKey = await _signingService.GetSigningKeyAsync(cancellationToken);
             var tokenHandler = new JwtSecurityTokenHandler();
             var validationParameters = new TokenValidationParameters
@@ -105,14 +123,20 @@ public class TokenService : ITokenService
                 ValidateLifetime = true,
                 ClockSkew = TimeSpan.Zero
             };
-            var principal = tokenHandler.ValidateToken(token, validationParameters, out _);
+            var principal = tokenHandler.ValidateToken(token, validationParameters, out var validatedToken);
             var clientId = principal.FindFirst("client_id")?.Value;
             var subjectId = principal.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+            var scopes = principal.FindAll("scope").Select(x => x.Value).Distinct(StringComparer.Ordinal).ToArray();
+            DateTime? expirationTime = validatedToken.ValidTo == DateTime.MinValue
+                                           ? null
+                                           : validatedToken.ValidTo;
             return new()
             {
                 IsValid = true,
                 ClientId = clientId,
-                SubjectId = subjectId
+                SubjectId = subjectId,
+                Scopes = scopes,
+                ExpirationTime = expirationTime
             };
         }
         catch (Exception ex)
@@ -128,9 +152,15 @@ public class TokenService : ITokenService
     }
 
     /// <inheritdoc />
-    public Task RevokeAsync(string token, CancellationToken cancellationToken = default) =>
-        // TODO: 实现 Token 撤销逻辑
-        Task.CompletedTask;
+    public Task RevokeAsync(string token, CancellationToken cancellationToken = default)
+    {
+        _revokedTokens[token] = DateTime.UtcNow;
+        return Task.CompletedTask;
+    }
+
+    private static bool ShouldIssueRefreshToken(TokenRequest request) =>
+        request.Client.AllowedGrantTypes.Contains(GrantType.RefreshToken) &&
+        request.GrantType is GrantType.AuthorizationCode or GrantType.RefreshToken or GrantType.DeviceCode;
 }
 
 /// <summary>
