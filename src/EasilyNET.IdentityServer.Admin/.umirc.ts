@@ -6,13 +6,15 @@ export default defineConfig({
   request: {},
   mfsu: false,
   layout: {
-    title: 'IdentityServer Admin',
+    title: 'IdentityServer 管理后台',
     locale: false,
+    layout: 'mix',
   },
   proxy: {
     '/api': {
-      target: 'http://localhost:5000',
+      target: 'https://localhost:5002',
       changeOrigin: true,
+      secure: false,
     },
   },
   routes: [
