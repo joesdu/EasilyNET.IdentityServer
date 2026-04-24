@@ -19,6 +19,11 @@ public class PersistedGrantEntity
 
     public required string Key { get; set; }
 
+    /// <summary>
+    /// 额外属性的JSON序列化
+    /// </summary>
+    public string? PropertiesJson { get; set; }
+
     public string? SessionId { get; set; }
 
     public string? SubjectId { get; set; }

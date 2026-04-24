@@ -1,3 +1,4 @@
+using System.Text.Json;
 using EasilyNET.IdentityServer.Abstractions.Models;
 using EasilyNET.IdentityServer.Abstractions.Stores;
 using EasilyNET.IdentityServer.DataAccess.EFCore.Entities;
@@ -24,6 +25,9 @@ public class EfPersistedGrantStore(IdentityServerDbContext db) : IPersistedGrant
             existing.ExpirationTime = grant.ExpirationTime;
             existing.ConsumedTime = grant.ConsumedTime;
             existing.Data = grant.Data;
+            existing.PropertiesJson = grant.Properties.Count > 0
+                ? JsonSerializer.Serialize(grant.Properties)
+                : null;
         }
         else
         {
@@ -38,7 +42,10 @@ public class EfPersistedGrantStore(IdentityServerDbContext db) : IPersistedGrant
                 CreationTime = grant.CreationTime,
                 ExpirationTime = grant.ExpirationTime,
                 ConsumedTime = grant.ConsumedTime,
-                Data = grant.Data
+                Data = grant.Data,
+                PropertiesJson = grant.Properties.Count > 0
+                    ? JsonSerializer.Serialize(grant.Properties)
+                    : null
             });
         }
         await db.SaveChangesAsync(cancellationToken);
@@ -109,7 +116,11 @@ public class EfPersistedGrantStore(IdentityServerDbContext db) : IPersistedGrant
             Key = e.Key, Type = e.Type, SubjectId = e.SubjectId, ClientId = e.ClientId,
             SessionId = e.SessionId, Description = e.Description,
             CreationTime = e.CreationTime, ExpirationTime = e.ExpirationTime,
-            ConsumedTime = e.ConsumedTime, Data = e.Data
+            ConsumedTime = e.ConsumedTime, Data = e.Data,
+            Properties = string.IsNullOrEmpty(e.PropertiesJson)
+                ? new Dictionary<string, string>()
+                : JsonSerializer.Deserialize<Dictionary<string, string>>(e.PropertiesJson)
+                  ?? new Dictionary<string, string>()
         };
 }
 

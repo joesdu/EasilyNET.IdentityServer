@@ -13,6 +13,11 @@ public interface ITokenService
     Task<TokenResult> CreateAccessTokenAsync(TokenRequest request, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// 创建 Identity Token (OIDC)
+    /// </summary>
+    Task<string?> CreateIdentityTokenAsync(TokenRequest request, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// 创建 Authorization Code
     /// </summary>
     Task<string> CreateAuthorizationCodeAsync(AuthorizationCodeRequest request, CancellationToken cancellationToken = default);
@@ -57,6 +62,11 @@ public class TokenRequest
     /// 授权类型
     /// </summary>
     public required string GrantType { get; init; }
+
+    /// <summary>
+    /// Nonce (用于 id_token 防重放)
+    /// </summary>
+    public string? Nonce { get; init; }
 
     /// <summary>
     /// Refresh Token (用于 Refresh Token 流程)
@@ -129,6 +139,11 @@ public class TokenResult
     /// 额外参数
     /// </summary>
     public IDictionary<string, string>? Extra { get; init; }
+
+    /// <summary>
+    /// Identity Token (OIDC)
+    /// </summary>
+    public string? IdToken { get; init; }
 
     /// <summary>
     /// Refresh Token

@@ -93,6 +93,16 @@ public class IdentityServerOptions
     public string Issuer { get; set; } = "https://identityserver.example.com";
 
     /// <summary>
+    /// 允许的访问令牌签名算法
+    /// </summary>
+    public ICollection<string> AllowedAccessTokenSigningAlgorithms { get; set; } = new[] { "RS256", "RS384", "RS512" };
+
+    /// <summary>
+    /// 允许的 Identity Token 签名算法
+    /// </summary>
+    public ICollection<string> AllowedIdentityTokenSigningAlgorithms { get; set; } = new[] { "RS256", "RS384", "RS512" };
+
+    /// <summary>
     /// 刷新令牌生命周期（秒）
     /// </summary>
     public int RefreshTokenLifetime { get; set; } = 86400;

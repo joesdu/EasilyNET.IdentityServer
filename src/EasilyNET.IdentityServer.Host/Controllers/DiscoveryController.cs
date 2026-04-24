@@ -1,6 +1,9 @@
+using System.Security.Cryptography;
+using System.Text.Json;
 using EasilyNET.IdentityServer.Abstractions.Extensions;
 using EasilyNET.IdentityServer.Abstractions.Models;
 using EasilyNET.IdentityServer.Abstractions.Stores;
+using EasilyNET.IdentityServer.Core.Services;
 using Microsoft.AspNetCore.Mvc;
 
 namespace EasilyNET.IdentityServer.Host.Controllers;
@@ -14,12 +17,14 @@ public class DiscoveryController : ControllerBase
     private readonly IClientStore _clientStore;
     private readonly IdentityServerOptions _options;
     private readonly IResourceStore _resourceStore;
+    private readonly ISigningService _signingService;
 
-    public DiscoveryController(IdentityServerOptions options, IResourceStore resourceStore, IClientStore clientStore)
+    public DiscoveryController(IdentityServerOptions options, IResourceStore resourceStore, IClientStore clientStore, ISigningService signingService)
     {
         _options = options;
         _resourceStore = resourceStore;
         _clientStore = clientStore;
+        _signingService = signingService;
     }
 
     /// <summary>
@@ -68,11 +73,34 @@ public class DiscoveryController : ControllerBase
     }
 
     /// <summary>
-    /// JSON Web Key Set
+    /// JSON Web Key Set (RFC 7517)
     /// </summary>
     [HttpGet("/.well-known/jwks")]
-    public IActionResult GetJwks() =>
-        // 开发环境使用对称密钥，不暴露 JWKS
-        // 生产环境应返回 RSA/EC 公钥
-        Ok(new { keys = Array.Empty<object>() });
+    public IActionResult GetJwks()
+    {
+        var rsa = _signingService.GetPublicKey();
+        if (rsa == null)
+        {
+            return Ok(new { keys = Array.Empty<object>() });
+        }
+        var parameters = rsa.ExportParameters(false);
+        var jwk = new Dictionary<string, object>
+        {
+            ["kty"] = "RSA",
+            ["use"] = "sig",
+            ["alg"] = "RS256",
+            ["kid"] = "rsa-key-1",
+            ["n"] = Base64UrlEncode(parameters.Modulus!),
+            ["e"] = Base64UrlEncode(parameters.Exponent!)
+        };
+        return Ok(new { keys = new[] { jwk } });
+    }
+
+    private static string Base64UrlEncode(byte[] data)
+    {
+        return Convert.ToBase64String(data)
+                     .TrimEnd('=')
+                     .Replace('+', '-')
+                     .Replace('/', '_');
+    }
 }

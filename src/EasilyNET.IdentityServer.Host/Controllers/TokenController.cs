@@ -122,21 +122,22 @@ public class TokenController : ControllerBase
             return BadRequest(new TokenErrorResponse("invalid_grant", "Authorization code has expired"));
         }
 
-        // 检查是否已消费
+        // 检查是否已消费 (在更新 ConsumedTime 之前检查,避免重放)
         if (grant.ConsumedTime.HasValue)
         {
             return BadRequest(new TokenErrorResponse("invalid_grant", "Authorization code has already been used"));
         }
 
-        // PKCE 验证
-        if (client.RequirePkce)
+        // PKCE 验证 (OAuth 2.1: 如果授权请求包含code_challenge,则必须验证code_verifier)
+        var codeChallenge = grant.Properties.TryGetValue("code_challenge", out var cc) ? cc : null;
+        var codeChallengeMethod = grant.Properties.TryGetValue("code_challenge_method", out var ccm) ? ccm : "S256";
+        if (!string.IsNullOrEmpty(codeChallenge))
         {
+            // 授权请求包含code_challenge,必须验证code_verifier
             if (string.IsNullOrEmpty(codeVerifier))
             {
-                return BadRequest(new TokenErrorResponse("invalid_request", "code_verifier is required"));
+                return BadRequest(new TokenErrorResponse("invalid_request", "code_verifier is required when code_challenge was present"));
             }
-            var codeChallenge = grant.Properties.TryGetValue("code_challenge", out var cc) ? cc : null;
-            var codeChallengeMethod = grant.Properties.TryGetValue("code_challenge_method", out var ccm) ? ccm : "S256";
             if (!ValidatePkce(codeVerifier, codeChallenge, codeChallengeMethod))
             {
                 return BadRequest(new TokenErrorResponse("invalid_grant", "PKCE validation failed"));
@@ -144,14 +145,24 @@ public class TokenController : ControllerBase
         }
         else if (!string.IsNullOrEmpty(codeVerifier))
         {
+            // 如果授权请求没有code_challenge但token请求包含code_verifier,拒绝
             return BadRequest(new TokenErrorResponse("invalid_request", "code_verifier must not be included when no code_challenge was used"));
         }
+        else if (client.RequirePkce)
+        {
+            // 客户端强制要求PKCE但授权请求没有code_challenge
+            return BadRequest(new TokenErrorResponse("invalid_request", "code_challenge is required for this client"));
+        }
 
-        // 验证 redirect_uri
+        // 验证 redirect_uri (OAuth 2.1 Section 10.2: 如果客户端有多个redirect_uri,则token请求必须提供redirect_uri)
         var storedRedirectUri = grant.Properties.TryGetValue("redirect_uri", out var sru) ? sru : null;
-        if (!string.IsNullOrEmpty(storedRedirectUri) &&
-            !string.Equals(storedRedirectUri, redirectUri, StringComparison.Ordinal) &&
-            !(string.IsNullOrEmpty(redirectUri) && client.RedirectUris.Count() == 1 && client.RedirectUris.Contains(storedRedirectUri, StringComparer.Ordinal)))
+        var hasMultipleRedirectUris = client.RedirectUris.Count() > 1;
+        if (hasMultipleRedirectUris && string.IsNullOrEmpty(redirectUri))
+        {
+            // 客户端注册了多个redirect_uri但token请求未提供
+            return BadRequest(new TokenErrorResponse("invalid_request", "redirect_uri is required when client has multiple registered redirect URIs"));
+        }
+        if (!string.IsNullOrEmpty(storedRedirectUri) && !string.Equals(storedRedirectUri, redirectUri, StringComparison.Ordinal))
         {
             return BadRequest(new TokenErrorResponse("invalid_grant", "redirect_uri mismatch"));
         }
@@ -159,17 +170,19 @@ public class TokenController : ControllerBase
         // 消费授权码
         await _grantStore.RemoveAsync(code, ct);
 
-        // 解析 scopes
+        // 解析 scopes 和 nonce
         var scopes = (grant.Properties.TryGetValue("scope", out var scopeStr) ? scopeStr : null)?.Split(' ', StringSplitOptions.RemoveEmptyEntries) ?? client.AllowedScopes.ToArray();
+        var nonce = grant.Properties.TryGetValue("nonce", out var n) ? n : null;
         var result = await _tokenService.CreateAccessTokenAsync(new()
         {
             Client = client,
             GrantType = GrantType.AuthorizationCode,
             Scopes = scopes,
             SubjectId = grant.SubjectId,
-            CodeVerifier = codeVerifier
+            CodeVerifier = codeVerifier,
+            Nonce = nonce
         }, ct);
-        await StoreRefreshTokenGrantAsync(client, grant.SubjectId, scopes, result, ct);
+        await StoreRefreshTokenGrantAsync(client, grant.SubjectId, scopes, result, nonce, ct);
         return Ok(new TokenSuccessResponse(result));
     }
 
@@ -190,6 +203,18 @@ public class TokenController : ControllerBase
             await _grantStore.RemoveAsync(refreshToken, ct);
             return BadRequest(new TokenErrorResponse("invalid_grant", "Refresh token has expired"));
         }
+
+        // 检查绝对生命周期 (OAuth 2.1 滑动窗口过期)
+        if (_options.EnableAbsoluteRefreshTokenLifetime)
+        {
+            var absoluteExpiration = grant.CreationTime.AddSeconds(_options.AbsoluteRefreshTokenLifetime);
+            if (absoluteExpiration < DateTime.UtcNow)
+            {
+                await _grantStore.RemoveAsync(refreshToken, ct);
+                return BadRequest(new TokenErrorResponse("invalid_grant", "Refresh token has exceeded its maximum lifetime"));
+            }
+        }
+
         var originalScopes = (grant.Properties.TryGetValue("scope", out var originalScopeValue) ? originalScopeValue : null)?.Split(' ', StringSplitOptions.RemoveEmptyEntries) ?? client.AllowedScopes.ToArray();
         var requestedScope = form["scope"].ToString();
         var scopes = string.IsNullOrEmpty(requestedScope) ? originalScopes : requestedScope.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -200,16 +225,18 @@ public class TokenController : ControllerBase
 
         // Refresh Token 轮换 (OAuth 2.1 要求)
         await _grantStore.RemoveAsync(refreshToken, ct);
+        var nonce = grant.Properties.TryGetValue("nonce", out var n) ? n : null;
         var result = await _tokenService.CreateAccessTokenAsync(new()
         {
             Client = client,
             GrantType = GrantType.RefreshToken,
             Scopes = scopes,
-            SubjectId = grant.SubjectId
+            SubjectId = grant.SubjectId,
+            Nonce = nonce
         }, ct);
 
         // 存储新的 Refresh Token
-        await StoreRefreshTokenGrantAsync(client, grant.SubjectId, scopes, result, ct);
+        await StoreRefreshTokenGrantAsync(client, grant.SubjectId, scopes, result, nonce, ct);
         return Ok(new TokenSuccessResponse(result));
     }
 
@@ -350,11 +377,19 @@ public class TokenController : ControllerBase
             : DeviceAuthorizationController.DefaultPollingIntervalSeconds;
     }
 
-    private Task StoreRefreshTokenGrantAsync(Client client, string? subjectId, IEnumerable<string> scopes, TokenResult result, CancellationToken ct)
+    private Task StoreRefreshTokenGrantAsync(Client client, string? subjectId, IEnumerable<string> scopes, TokenResult result, string? nonce, CancellationToken ct)
     {
         if (string.IsNullOrEmpty(result.RefreshToken))
         {
             return Task.CompletedTask;
+        }
+        var properties = new Dictionary<string, string>
+        {
+            ["scope"] = string.Join(" ", scopes)
+        };
+        if (!string.IsNullOrEmpty(nonce))
+        {
+            properties["nonce"] = nonce;
         }
         return _grantStore.StoreAsync(new()
         {
@@ -365,10 +400,7 @@ public class TokenController : ControllerBase
             CreationTime = DateTime.UtcNow,
             ExpirationTime = DateTime.UtcNow.AddSeconds(client.RefreshTokenLifetime > 0 ? client.RefreshTokenLifetime : _options.RefreshTokenLifetime),
             Data = "",
-            Properties = new Dictionary<string, string>
-            {
-                ["scope"] = string.Join(" ", scopes)
-            }
+            Properties = properties
         }, ct);
     }
 
@@ -446,6 +478,11 @@ internal sealed class TokenSuccessResponse
 
     public int expires_in { get; }
 
+    /// <summary>
+    /// Identity Token (OIDC)
+    /// </summary>
+    public string? id_token { get; }
+
     public string? refresh_token { get; }
 
     public string? scope { get; }
@@ -459,5 +496,6 @@ internal sealed class TokenSuccessResponse
         expires_in = result.ExpiresIn;
         refresh_token = result.RefreshToken;
         scope = result.Scope;
+        id_token = result.IdToken;
     }
 }

@@ -59,6 +59,18 @@ public class AuthorizeController : ControllerBase
             return BadRequest(new { error = "invalid_request", error_description = "redirect_uri is required" });
         }
 
+        // 验证 state 长度 (OAuth 2.1 建议不超过 512 字符)
+        if (!string.IsNullOrEmpty(state) && state.Length > 512)
+        {
+            return BadRequest(new { error = "invalid_request", error_description = "state parameter exceeds maximum length of 512 characters" });
+        }
+
+        // 验证 nonce 长度 (OIDC 建议不超过 512 字符)
+        if (!string.IsNullOrEmpty(nonce) && nonce.Length > 512)
+        {
+            return BadRequest(new { error = "invalid_request", error_description = "nonce parameter exceeds maximum length of 512 characters" });
+        }
+
         var requestedScopes = string.IsNullOrEmpty(scope)
             ? []
             : scope.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
@@ -87,29 +99,47 @@ public class AuthorizeController : ControllerBase
             requestedScopes = client.AllowedScopes.ToList();
         }
 
-        // 在实际应用中，这里应该检查用户是否已登录
-        // 如果未登录，重定向到登录页面
-        // 如果需要 consent，重定向到 consent 页面
-        // 这里简化处理：假设用户已登录，SubjectId 从 header 或 query 获取
+        // 处理 prompt 参数 (OIDC)
         var subjectId = Request.Headers["X-Subject-Id"].ToString();
         if (string.IsNullOrEmpty(subjectId))
         {
             subjectId = Request.Query["subject_id"].ToString();
         }
+
+        // 根据 prompt 参数处理
+        if (!string.IsNullOrEmpty(prompt))
+        {
+            var prompts = prompt.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+            // prompt=none: 不能显示登录或consent页面
+            if (prompts.Contains("none"))
+            {
+                if (string.IsNullOrEmpty(subjectId))
+                {
+                    // 用户未登录且 prompt=none
+                    return RedirectWithError(redirect_uri, state, "login_required", "User is not authenticated");
+                }
+                // 注意: 实际实现应该检查是否存在有效的 session 且用户已同意
+            }
+
+            // prompt=login: 强制重新认证
+            if (prompts.Contains("login"))
+            {
+                // 强制重新登录 - 清除现有 subjectId
+                subjectId = string.Empty;
+            }
+        }
+
+        // 检查用户是否已登录
         if (string.IsNullOrEmpty(subjectId))
         {
             // 返回需要登录的提示
-            return Unauthorized(new
-            {
-                error = "login_required",
-                error_description = "User authentication is required. Provide X-Subject-Id header or subject_id query parameter.",
-                authorize_url = Request.Path.Value,
-                client_id,
-                redirect_uri,
-                scope = string.Join(" ", requestedScopes),
-                state
-            });
+            return RedirectWithError(redirect_uri, state, "login_required", "User authentication is required");
         }
+
+        // 检查是否需要 consent (prompt=consent 强制要求)
+        var needsConsent = client.RequireConsent || (prompt?.Contains("consent") ?? false);
+        // 注意: 实际实现应该检查用户是否已经同意了所有请求的 scopes
 
         var approval = await _authorizationService.ApproveAuthorizationRequestAsync(new()
         {

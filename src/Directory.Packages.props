@@ -44,6 +44,7 @@
   <!-- Identity Model -->
   <ItemGroup Label="IdentityModel">
     <PackageVersion Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.17.0" />
+    <PackageVersion Include="Microsoft.IdentityModel.Tokens" Version="8.17.0" />
     <PackageVersion Include="System.IdentityModel.Tokens.Jwt" Version="8.17.0" />
   </ItemGroup>
   <!-- Database providers -->
@@ -53,6 +54,6 @@
   </ItemGroup>
   <!-- MongoDB -->
   <ItemGroup Label="MongoDB">
-    <PackageVersion Include="MongoDB.Driver" Version="3.7.1" />
+    <PackageVersion Include="MongoDB.Driver" Version="3.8.0" />
   </ItemGroup>
 </Project>

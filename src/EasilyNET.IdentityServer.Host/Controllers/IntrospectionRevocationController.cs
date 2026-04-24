@@ -43,6 +43,15 @@ public class IntrospectionController : ControllerBase
         {
             return Ok(new { active = false });
         }
+
+        // RFC 7662: 客户端只能内省属于自己的 token
+        var requestingClient = authResult.Client!;
+        if (result.ClientId != requestingClient.ClientId)
+        {
+            // 如果请求的客户端与 token 的客户端不匹配,返回 inactive
+            return Ok(new { active = false });
+        }
+
         return Ok(new
         {
             active = true,

@@ -110,23 +110,40 @@ public class ClientAuthenticationService : IClientAuthenticationService
                 continue; // 跳过过期的密钥
             }
 
-            // 简单比较 (生产环境应使用常量时间比较)
-            if (s.Value == secret)
+            // 使用常量时间比较防止时序攻击 (OAuth 2.1 安全要求)
+            var isMatch = s.Type switch
+            {
+                // SHA256哈希比较
+                "Sha256" => FixedTimeEquals(
+                    Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(secret))),
+                    s.Value),
+                // 其他类型使用原始值比较
+                _ => FixedTimeEquals(s.Value, secret)
+            };
+            if (isMatch)
             {
                 return true;
             }
-
-            // 支持哈希后的密钥比较
-            if (s.Type == "Sha256")
-            {
-                var hash = Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(secret)));
-                if (hash == s.Value)
-                {
-                    return true;
-                }
-            }
         }
         return false;
+    }
+
+    /// <summary>
+    /// 常量时间字符串比较，防止时序攻击
+    /// </summary>
+    private static bool FixedTimeEquals(string a, string b)
+    {
+        if (a.Length != b.Length)
+        {
+            // 为了保持常量时间，即使长度不同也要进行比较
+            var dummyA = new byte[Math.Max(a.Length, b.Length)];
+            var dummyB = new byte[Math.Max(a.Length, b.Length)];
+            CryptographicOperations.FixedTimeEquals(dummyA, dummyB);
+            return false;
+        }
+        var bytesA = Encoding.UTF8.GetBytes(a);
+        var bytesB = Encoding.UTF8.GetBytes(b);
+        return CryptographicOperations.FixedTimeEquals(bytesA, bytesB);
     }
 
     /// <summary>

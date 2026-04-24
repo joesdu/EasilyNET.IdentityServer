@@ -6,11 +6,17 @@ using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace EasilyNET.IdentityServer.IntegrationTests;
 
+/// <summary>
+/// IdentityServer Integration Tests
+/// </summary>
 [TestClass]
 public class IdentityServerTests
 {
     private HttpClient _client = null!;
 
+    /// <summary>
+    /// Initialize test environment
+    /// </summary>
     [TestInitialize]
     public void Setup()
     {
@@ -62,6 +68,9 @@ public class IdentityServerTests
 
     #region Revocation
 
+    /// <summary>
+    /// Test revocation endpoint with valid token returns 200
+    /// </summary>
     [TestMethod]
     public async Task Revocation_ValidToken_Returns200()
     {
@@ -85,6 +94,9 @@ public class IdentityServerTests
         response.EnsureSuccessStatusCode();
     }
 
+    /// <summary>
+    /// Test revocation with invalid client secret returns unauthorized
+    /// </summary>
     [TestMethod]
     public async Task Revocation_InvalidClientSecret_ReturnsUnauthorized()
     {
@@ -99,6 +111,9 @@ public class IdentityServerTests
 
     #region Health
 
+    /// <summary>
+    /// Test health endpoint returns healthy status
+    /// </summary>
     [TestMethod]
     public async Task Health_ReturnsOk()
     {
@@ -112,6 +127,9 @@ public class IdentityServerTests
 
     #region Discovery
 
+    /// <summary>
+    /// Test discovery endpoint returns expected endpoints
+    /// </summary>
     [TestMethod]
     public async Task Discovery_ReturnsExpectedEndpoints()
     {
@@ -136,6 +154,9 @@ public class IdentityServerTests
         Assert.IsTrue(authMethods.Contains("none"));
     }
 
+    /// <summary>
+    /// Test JWKS endpoint returns keys array
+    /// </summary>
     [TestMethod]
     public async Task Jwks_ReturnsKeysArray()
     {
@@ -150,6 +171,9 @@ public class IdentityServerTests
 
     #region Client Credentials
 
+    /// <summary>
+    /// Test client credentials flow with valid client returns access token
+    /// </summary>
     [TestMethod]
     public async Task ClientCredentials_ValidClient_ReturnsAccessToken()
     {
@@ -172,6 +196,9 @@ public class IdentityServerTests
         Assert.IsTrue(root.GetProperty("expires_in").GetInt32() > 0);
     }
 
+    /// <summary>
+    /// Test client credentials flow with basic auth returns access token
+    /// </summary>
     [TestMethod]
     public async Task ClientCredentials_BasicAuth_ReturnsAccessToken()
     {
@@ -185,6 +212,9 @@ public class IdentityServerTests
         Assert.IsTrue(json.RootElement.TryGetProperty("access_token", out _));
     }
 
+    /// <summary>
+    /// Test client credentials with invalid secret returns unauthorized
+    /// </summary>
     [TestMethod]
     public async Task ClientCredentials_InvalidSecret_ReturnsUnauthorized()
     {
@@ -197,6 +227,9 @@ public class IdentityServerTests
         Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
+    /// <summary>
+    /// Test client credentials with invalid scope returns bad request
+    /// </summary>
     [TestMethod]
     public async Task ClientCredentials_InvalidScope_ReturnsBadRequest()
     {
@@ -210,6 +243,9 @@ public class IdentityServerTests
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
+    /// <summary>
+    /// Test client credentials with unknown client returns unauthorized
+    /// </summary>
     [TestMethod]
     public async Task ClientCredentials_UnknownClient_ReturnsUnauthorized()
     {
@@ -226,6 +262,9 @@ public class IdentityServerTests
 
     #region Token Endpoint Validation
 
+    /// <summary>
+    /// Test token endpoint with missing grant type returns bad request
+    /// </summary>
     [TestMethod]
     public async Task Token_MissingGrantType_ReturnsBadRequest()
     {
@@ -237,6 +276,9 @@ public class IdentityServerTests
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
+    /// <summary>
+    /// Test token endpoint with unsupported grant type returns error
+    /// </summary>
     [TestMethod]
     public async Task Token_UnsupportedGrantType_ReturnsError()
     {
@@ -253,6 +295,9 @@ public class IdentityServerTests
 
     #region Authorization Code
 
+    /// <summary>
+    /// Test authorization code full flow returns access and refresh token
+    /// </summary>
     [TestMethod]
     public async Task AuthorizationCode_FullFlow_ReturnsAccessAndRefreshToken()
     {
@@ -283,6 +328,9 @@ public class IdentityServerTests
         Assert.IsFalse(string.IsNullOrEmpty(refreshToken.GetString()));
     }
 
+    /// <summary>
+    /// Test authorization code flow with missing state is allowed
+    /// </summary>
     [TestMethod]
     public async Task AuthorizationCode_MissingState_IsAllowed()
     {
@@ -296,6 +344,9 @@ public class IdentityServerTests
         Assert.AreEqual("https://localhost:7020", query["iss"]);
     }
 
+    /// <summary>
+    /// Test authorization code with wrong verifier returns invalid grant
+    /// </summary>
     [TestMethod]
     public async Task AuthorizationCode_WithWrongVerifier_ReturnsInvalidGrant()
     {
@@ -318,6 +369,9 @@ public class IdentityServerTests
         Assert.AreEqual("invalid_grant", body.RootElement.GetProperty("error").GetString());
     }
 
+    /// <summary>
+    /// Test authorization with invalid scope redirects with issuer and error
+    /// </summary>
     [TestMethod]
     public async Task Authorization_InvalidScope_RedirectsWithIssuerAndError()
     {
@@ -331,6 +385,9 @@ public class IdentityServerTests
         Assert.AreEqual("https://localhost:7020", query["iss"]);
     }
 
+    /// <summary>
+    /// Test refresh token rotation and old token becomes invalid
+    /// </summary>
     [TestMethod]
     public async Task RefreshToken_RotatesAndOldTokenBecomesInvalid()
     {
@@ -373,6 +430,9 @@ public class IdentityServerTests
         Assert.AreEqual(HttpStatusCode.BadRequest, oldRefreshResponse.StatusCode);
     }
 
+    /// <summary>
+    /// Test refresh token can request narrower scope
+    /// </summary>
     [TestMethod]
     public async Task RefreshToken_CanRequestNarrowerScope()
     {
@@ -407,6 +467,9 @@ public class IdentityServerTests
         Assert.AreEqual("openid api1", refreshedJson.RootElement.GetProperty("scope").GetString());
     }
 
+    /// <summary>
+    /// Test refresh token cannot expand scope
+    /// </summary>
     [TestMethod]
     public async Task RefreshToken_CannotExpandScope()
     {
@@ -445,6 +508,9 @@ public class IdentityServerTests
 
     #region Introspection
 
+    /// <summary>
+    /// Test introspection with valid token returns active
+    /// </summary>
     [TestMethod]
     public async Task Introspection_ValidToken_ReturnsActive()
     {
@@ -470,6 +536,9 @@ public class IdentityServerTests
         Assert.IsTrue(json.RootElement.GetProperty("active").GetBoolean());
     }
 
+    /// <summary>
+    /// Test introspection with invalid client secret returns unauthorized
+    /// </summary>
     [TestMethod]
     public async Task Introspection_InvalidClientSecret_ReturnsUnauthorized()
     {
@@ -480,6 +549,9 @@ public class IdentityServerTests
         Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
+    /// <summary>
+    /// Test introspection with invalid token returns inactive
+    /// </summary>
     [TestMethod]
     public async Task Introspection_InvalidToken_ReturnsInactive()
     {
@@ -492,6 +564,9 @@ public class IdentityServerTests
         Assert.IsFalse(json.RootElement.GetProperty("active").GetBoolean());
     }
 
+    /// <summary>
+    /// Test introspection of revoked token returns inactive
+    /// </summary>
     [TestMethod]
     public async Task Introspection_RevokedToken_ReturnsInactive()
     {
@@ -525,6 +600,9 @@ public class IdentityServerTests
 
     #region Device Flow
 
+    /// <summary>
+    /// Test device authorization with valid client returns device code
+    /// </summary>
     [TestMethod]
     public async Task DeviceAuthorization_ValidClient_ReturnsDeviceCode()
     {
@@ -546,6 +624,9 @@ public class IdentityServerTests
         Assert.AreEqual(5, root.GetProperty("interval").GetInt32());
     }
 
+    /// <summary>
+    /// Test device authorization with unauthorized client returns 400
+    /// </summary>
     [TestMethod]
     public async Task DeviceAuthorization_UnauthorizedClient_Returns400()
     {
@@ -556,6 +637,9 @@ public class IdentityServerTests
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
+    /// <summary>
+    /// Test device code pending authorization returns authorization pending
+    /// </summary>
     [TestMethod]
     public async Task DeviceCode_PendingAuthorization_ReturnsAuthorizationPending()
     {
@@ -581,6 +665,9 @@ public class IdentityServerTests
         Assert.AreEqual("authorization_pending", errorJson.RootElement.GetProperty("error").GetString());
     }
 
+    /// <summary>
+    /// Test device code polling too quickly returns slow down
+    /// </summary>
     [TestMethod]
     public async Task DeviceCode_PollingTooQuickly_ReturnsSlowDown()
     {
@@ -614,6 +701,9 @@ public class IdentityServerTests
         Assert.AreEqual("slow_down", secondErrorJson.RootElement.GetProperty("error").GetString());
     }
 
+    /// <summary>
+    /// Test device code full flow returns access token
+    /// </summary>
     [TestMethod]
     public async Task DeviceCode_FullFlow_ReturnsAccessToken()
     {
