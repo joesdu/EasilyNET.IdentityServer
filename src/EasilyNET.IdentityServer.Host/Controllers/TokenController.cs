@@ -16,6 +16,7 @@ namespace EasilyNET.IdentityServer.Host.Controllers;
 [ApiController]
 public class TokenController : ControllerBase
 {
+    private readonly IAuditService _auditService;
     private readonly IClientAuthenticationService _clientAuth;
     private readonly IDeviceFlowStore _deviceFlowStore;
     private readonly ILogger<TokenController> _logger;
@@ -29,7 +30,8 @@ public class TokenController : ControllerBase
         IPersistedGrantStore grantStore,
         IDeviceFlowStore deviceFlowStore,
         IdentityServerOptions options,
-        ILogger<TokenController> logger)
+        ILogger<TokenController> logger,
+        IAuditService auditService)
     {
         _clientAuth = clientAuth;
         _tokenService = tokenService;
@@ -37,6 +39,7 @@ public class TokenController : ControllerBase
         _deviceFlowStore = deviceFlowStore;
         _options = options;
         _logger = logger;
+        _auditService = auditService;
     }
 
     /// <summary>
@@ -92,6 +95,8 @@ public class TokenController : ControllerBase
         var validScopes = await ValidateScopes(scopes, client, ct);
         if (validScopes == null)
         {
+            await _auditService.LogAuthenticationFailedAsync(client.ClientId, GrantType.ClientCredentials,
+                "Invalid scope", GetClientIpAddress(), ct);
             return BadRequest(new TokenErrorResponse("invalid_scope", "One or more requested scopes are not allowed"));
         }
         var result = await _tokenService.CreateAccessTokenAsync(new()
@@ -100,6 +105,11 @@ public class TokenController : ControllerBase
             GrantType = GrantType.ClientCredentials,
             Scopes = validScopes
         }, ct);
+
+        // 记录审计日志
+        await _auditService.LogTokenIssuedAsync(client.ClientId, null, GrantType.ClientCredentials,
+            validScopes, GetClientIpAddress(), ct);
+
         return Ok(new TokenSuccessResponse(result));
     }
 
@@ -219,6 +229,12 @@ public class TokenController : ControllerBase
             Nonce = nonce
         }, ct);
         await StoreRefreshTokenGrantAsync(client, grant.SubjectId, scopes, result, nonce, ct);
+
+        // 记录审计日志
+        await _auditService.LogAuthorizationCodeExchangedAsync(client.ClientId, grant.SubjectId, GetClientIpAddress(), ct);
+        await _auditService.LogTokenIssuedAsync(client.ClientId, grant.SubjectId, GrantType.AuthorizationCode,
+            scopes, GetClientIpAddress(), ct);
+
         return Ok(new TokenSuccessResponse(result));
     }
 
@@ -273,6 +289,12 @@ public class TokenController : ControllerBase
 
         // 存储新的 Refresh Token
         await StoreRefreshTokenGrantAsync(client, grant.SubjectId, scopes, result, nonce, ct);
+
+        // 记录审计日志
+        await _auditService.LogRefreshTokenUsedAsync(client.ClientId, grant.SubjectId, true, GetClientIpAddress(), ct);
+        await _auditService.LogTokenIssuedAsync(client.ClientId, grant.SubjectId, GrantType.RefreshToken,
+            scopes, GetClientIpAddress(), ct);
+
         return Ok(new TokenSuccessResponse(result));
     }
 
@@ -481,6 +503,17 @@ public class TokenController : ControllerBase
                .TrimEnd('=')
                .Replace('+', '-')
                .Replace('/', '_');
+
+    private string? GetClientIpAddress()
+    {
+        // 优先从 X-Forwarded-For 获取（代理场景）
+        var forwardedFor = Request.Headers["X-Forwarded-For"].FirstOrDefault();
+        if (!string.IsNullOrEmpty(forwardedFor))
+        {
+            return forwardedFor.Split(',')[0].Trim();
+        }
+        return HttpContext.Connection.RemoteIpAddress?.ToString();
+    }
 
     private void SetSensitiveResponseHeaders()
     {

@@ -113,12 +113,10 @@ public class ClientAuthenticationService : IClientAuthenticationService
             // 使用常量时间比较防止时序攻击 (OAuth 2.1 安全要求)
             var isMatch = s.Type switch
             {
-                // SHA256哈希比较
-                "Sha256" => FixedTimeEquals(
-                    Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(secret))),
-                    s.Value),
-                // 其他类型使用原始值比较
-                _ => FixedTimeEquals(s.Value, secret)
+                // 支持明文凭据（仅用于开发/测试，不推荐生产环境）
+                "PlainText" => FixedTimeEquals(s.Value, secret),
+                // 默认使用 SHA256 哈希比较（推荐）
+                _ => SecretHasher.VerifySecret(secret, s.Value)
             };
             if (isMatch)
             {

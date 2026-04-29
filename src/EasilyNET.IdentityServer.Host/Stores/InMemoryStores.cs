@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using EasilyNET.IdentityServer.Abstractions.Models;
 using EasilyNET.IdentityServer.Abstractions.Stores;
+using EasilyNET.IdentityServer.Core.Services;
 
 namespace EasilyNET.IdentityServer.Host.Stores;
 
@@ -25,7 +26,7 @@ public class InMemoryClientStore : IClientStore
             FrontChannelLogoutUris = ["https://localhost:5002/signout-oidc"],
             BackChannelLogoutUris = ["https://localhost:5002/bff/signout-oidc"],
             AllowedScopes = ["openid", "profile", "email", "api1"],
-            ClientSecrets = [new() { Value = "secret", Description = "MVC Client Secret" }],
+            ClientSecrets = [new() { Value = SecretHasher.HashSecret("secret"), Description = "MVC Client Secret" }],
             RequirePkce = true,
             RequireClientSecret = true,
             RequireConsent = false
@@ -38,7 +39,7 @@ public class InMemoryClientStore : IClientStore
             Enabled = true,
             AllowedGrantTypes = [GrantType.ClientCredentials],
             AllowedScopes = ["api1"],
-            ClientSecrets = [new() { Value = "secret", Description = "Console Client Secret" }],
+            ClientSecrets = [new() { Value = SecretHasher.HashSecret("secret"), Description = "Console Client Secret" }],
             RequireClientSecret = true
         });
         _clients.Add(new()

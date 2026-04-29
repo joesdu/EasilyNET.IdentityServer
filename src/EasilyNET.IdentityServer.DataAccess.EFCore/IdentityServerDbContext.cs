@@ -9,6 +9,7 @@ namespace EasilyNET.IdentityServer.DataAccess.EFCore;
 /// </summary>
 public class IdentityServerDbContext(DbContextOptions<IdentityServerDbContext> options) : DbContext(options), IIdentityServerDbContext
 {
+    public DbSet<SigningKeyEntity> SigningKeys => Set<SigningKeyEntity>();
     public DbSet<ApiResourceClaimEntity> ApiResourceClaims => Set<ApiResourceClaimEntity>();
 
     public DbSet<ApiResourcePropertyEntity> ApiResourceProperties => Set<ApiResourcePropertyEntity>();
@@ -124,6 +125,15 @@ public class IdentityServerDbContext(DbContextOptions<IdentityServerDbContext> o
         {
             b.HasKey(x => x.Id);
             b.HasIndex(x => new { x.SubjectId, x.ClientId }).IsUnique();
+        });
+
+        // SigningKey
+        modelBuilder.Entity<SigningKeyEntity>(b =>
+        {
+            b.HasKey(x => x.Id);
+            b.HasIndex(x => x.KeyId).IsUnique();
+            b.HasIndex(x => x.DisabledAt);
+            b.Property(x => x.PrivateKey).HasMaxLength(4000);
         });
     }
 }

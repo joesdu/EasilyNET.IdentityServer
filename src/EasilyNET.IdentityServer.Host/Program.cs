@@ -3,6 +3,7 @@ using EasilyNET.IdentityServer.Abstractions.Extensions;
 using EasilyNET.IdentityServer.Abstractions.Services;
 using EasilyNET.IdentityServer.Abstractions.Stores;
 using EasilyNET.IdentityServer.Core.Services;
+using EasilyNET.IdentityServer.Host.Middleware;
 using EasilyNET.IdentityServer.Host.Stores;
 using Serilog;
 using Serilog.Events;
@@ -57,13 +58,37 @@ builder.Services.AddSingleton<IClientStore, InMemoryClientStore>();
 builder.Services.AddSingleton<IResourceStore, InMemoryResourceStore>();
 builder.Services.AddSingleton<IPersistedGrantStore, InMemoryPersistedGrantStore>();
 builder.Services.AddSingleton<IDeviceFlowStore, InMemoryDeviceFlowStore>();
+builder.Services.AddSingleton<ISigningKeyStore, InMemorySigningKeyStore>();
+builder.Services.AddSingleton<IAuditLogStore, InMemoryAuditLogStore>();
 
 // 注册核心服务
 builder.Services.AddSingleton<ISerializationService, SerializationService>();
 builder.Services.AddSingleton<ITokenService, TokenService>();
 builder.Services.AddSingleton<IClientAuthenticationService, ClientAuthenticationService>();
 builder.Services.AddSingleton<IAuthorizationService, AuthorizationService>();
-builder.Services.AddSingleton<ISigningService, DefaultSigningService>();
+builder.Services.AddSingleton<IAuditService, AuditService>();
+
+// 注册 HttpContextAccessor（审计服务和速率限制服务需要）
+builder.Services.AddHttpContextAccessor();
+
+// 注册速率限制服务
+builder.Services.AddRateLimiting(options =>
+{
+    options.Enabled = true;
+    options.IncludeHeaders = true;
+
+    // 可以根据环境调整限制
+    if (builder.Environment.IsDevelopment())
+    {
+        // 开发环境放宽限制
+        options.IpLimits.ForEach(l => l.MaxRequests *= 2);
+        options.ClientLimits.ForEach(l => l.MaxRequests *= 2);
+    }
+});
+
+// 注册签名服务 - 使用持久化版本（生产环境）
+// 如需使用内存版本（开发环境），将 PersistentSigningService 改为 DefaultSigningService
+builder.Services.AddSingleton<ISigningService, PersistentSigningService>();
 
 // 注册数据库清理服务 (仅在使用 EF Core/MongoDB 存储时需要,内存存储不需要)
 builder.Services.AddSingleton<DatabaseCleanupService>();
@@ -81,6 +106,12 @@ var app = builder.Build();
 
 // 配置中间件
 app.UseSerilogRequestLogging();
+
+// 速率限制中间件（必须在审计日志之前，以便在限制时也能记录）
+app.UseRateLimiting();
+
+// 审计日志中间件
+app.UseAuditLogging();
 
 // 安全响应头中间件 (RFC 7033 - WebFinger, 安全最佳实践)
 app.Use(async (context, next) =>

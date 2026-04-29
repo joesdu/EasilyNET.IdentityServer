@@ -2,8 +2,8 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using EasilyNET.IdentityServer.Abstractions.Extensions;
 using EasilyNET.IdentityServer.Abstractions.Models;
+using EasilyNET.IdentityServer.Abstractions.Services;
 using EasilyNET.IdentityServer.Abstractions.Stores;
-using EasilyNET.IdentityServer.Core.Services;
 using Microsoft.AspNetCore.Mvc;
 
 namespace EasilyNET.IdentityServer.Host.Controllers;
@@ -72,6 +72,7 @@ var scopeNames = scopes.Select(s => s.Name)
             ["issuer"] = issuer,
             ["authorization_endpoint"] = $"{issuer}/connect/authorize",
             ["token_endpoint"] = $"{issuer}/connect/token",
+            ["userinfo_endpoint"] = $"{issuer}/connect/userinfo",
             ["device_authorization_endpoint"] = $"{issuer}/connect/device_authorization",
             ["introspection_endpoint"] = $"{issuer}/connect/introspect",
             ["revocation_endpoint"] = $"{issuer}/connect/revocation",
@@ -94,24 +95,30 @@ var scopeNames = scopes.Select(s => s.Name)
     /// JSON Web Key Set (RFC 7517)
     /// </summary>
     [HttpGet("/.well-known/jwks")]
-    public IActionResult GetJwks()
+    public async Task<IActionResult> GetJwks(CancellationToken cancellationToken)
     {
-        var rsa = _signingService.GetPublicKey();
-        if (rsa == null)
+        var keys = await _signingService.GetAllSigningKeysAsync(cancellationToken);
+        var jwks = new List<Dictionary<string, object>>();
+
+        foreach (var key in keys.Where(k => !k.IsDisabled))
         {
-            return Ok(new { keys = Array.Empty<object>() });
+            if (key.Key is Microsoft.IdentityModel.Tokens.RsaSecurityKey rsaKey && rsaKey.Rsa != null)
+            {
+                var parameters = rsaKey.Rsa.ExportParameters(false);
+                var jwk = new Dictionary<string, object>
+                {
+                    ["kty"] = "RSA",
+                    ["use"] = key.Credentials.Key is Microsoft.IdentityModel.Tokens.AsymmetricSecurityKey ? "sig" : "enc",
+                    ["alg"] = key.Algorithm,
+                    ["kid"] = key.KeyId,
+                    ["n"] = Base64UrlEncode(parameters.Modulus!),
+                    ["e"] = Base64UrlEncode(parameters.Exponent!)
+                };
+                jwks.Add(jwk);
+            }
         }
-        var parameters = rsa.ExportParameters(false);
-        var jwk = new Dictionary<string, object>
-        {
-            ["kty"] = "RSA",
-            ["use"] = "sig",
-            ["alg"] = "RS256",
-            ["kid"] = "rsa-key-1",
-            ["n"] = Base64UrlEncode(parameters.Modulus!),
-            ["e"] = Base64UrlEncode(parameters.Exponent!)
-        };
-        return Ok(new { keys = new[] { jwk } });
+
+        return Ok(new { keys = jwks });
     }
 
     private static string Base64UrlEncode(byte[] data)
