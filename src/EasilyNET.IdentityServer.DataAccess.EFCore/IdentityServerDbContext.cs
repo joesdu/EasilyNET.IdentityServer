@@ -105,6 +105,7 @@ public class IdentityServerDbContext(DbContextOptions<IdentityServerDbContext> o
         {
             b.HasKey(x => x.Key);
             b.Property(x => x.Key).HasMaxLength(200);
+            b.Property(x => x.RowVersion).IsRowVersion();
             b.HasIndex(x => new { x.SubjectId, x.ClientId, x.Type });
             b.HasIndex(x => x.ExpirationTime);
         });

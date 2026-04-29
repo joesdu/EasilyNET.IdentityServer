@@ -65,6 +65,9 @@ builder.Services.AddSingleton<IClientAuthenticationService, ClientAuthentication
 builder.Services.AddSingleton<IAuthorizationService, AuthorizationService>();
 builder.Services.AddSingleton<ISigningService, DefaultSigningService>();
 
+// 注册数据库清理服务 (仅在使用 EF Core/MongoDB 存储时需要,内存存储不需要)
+builder.Services.AddSingleton<DatabaseCleanupService>();
+
 // 注册 Token 响应生成器
 builder.Services.AddTransient<ITokenResponseGenerator, DefaultTokenResponseGenerator>();
 
@@ -78,6 +81,31 @@ var app = builder.Build();
 
 // 配置中间件
 app.UseSerilogRequestLogging();
+
+// 安全响应头中间件 (RFC 7033 - WebFinger, 安全最佳实践)
+app.Use(async (context, next) =>
+{
+    // 点击劫持保护
+    context.Response.Headers["X-Frame-Options"] = "DENY";
+
+    // 内容安全策略
+    context.Response.Headers["Content-Security-Policy"] = "frame-ancestors 'none'; base-uri 'self'; default-src 'self'";
+
+    // 防止 MIME 类型 sniffing
+    context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+
+    // XSS 保护
+    context.Response.Headers["X-Permitted-Cross-Domain-Policies"] = "none";
+
+    // 引用来源策略
+    context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+
+    // 权限策略
+    context.Response.Headers["Permissions-Policy"] = "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), interest-cohort=()";
+
+    await next();
+});
+
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();

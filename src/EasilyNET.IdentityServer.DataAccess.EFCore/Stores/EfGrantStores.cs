@@ -159,11 +159,11 @@ public class EfDeviceFlowStore(IdentityServerDbContext db) : IDeviceFlowStore
 
     public async Task ConsumeDeviceCodeAsync(string deviceCode, CancellationToken cancellationToken = default)
     {
-        // 标记为已消费 (通过删除实现)
+        // 标记为已消费 (通过设置 Data = "consumed" 实现，与 InMemory 存储保持一致)
         var entity = await db.DeviceCodes.FirstOrDefaultAsync(d => d.DeviceCode == deviceCode, cancellationToken);
         if (entity != null)
         {
-            db.DeviceCodes.Remove(entity);
+            entity.Data = "consumed";
             await db.SaveChangesAsync(cancellationToken);
         }
     }

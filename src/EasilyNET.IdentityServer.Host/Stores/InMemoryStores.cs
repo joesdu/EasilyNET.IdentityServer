@@ -191,6 +191,11 @@ public class InMemoryPersistedGrantStore : IPersistedGrantStore
         lock (_lock)
         {
             _grants.TryGetValue(key, out var grant);
+            // 过滤掉已消费的授权码
+            if (grant != null && grant.ConsumedTime.HasValue)
+            {
+                return Task.FromResult<PersistedGrant?>(null);
+            }
             return Task.FromResult(grant);
         }
     }

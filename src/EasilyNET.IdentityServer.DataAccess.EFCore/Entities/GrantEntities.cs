@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace EasilyNET.IdentityServer.DataAccess.EFCore.Entities;
 
 /// <summary>
@@ -29,6 +31,12 @@ public class PersistedGrantEntity
     public string? SubjectId { get; set; }
 
     public required string Type { get; set; }
+
+    /// <summary>
+    /// 并发令牌，用于乐观并发控制，防止授权码重用竞态条件
+    /// </summary>
+    [ConcurrencyCheck]
+    public byte[]? RowVersion { get; set; }
 }
 
 /// <summary>

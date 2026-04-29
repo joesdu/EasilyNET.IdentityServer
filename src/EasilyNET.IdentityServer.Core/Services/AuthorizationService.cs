@@ -72,8 +72,9 @@ public class AuthorizationService : IAuthorizationService
             };
         }
 
-        // 严格匹配 redirect_uri (OAuth 2.1 要求)
-        if (!client.RedirectUris.Contains(request.RedirectUri))
+        // 严格匹配 redirect_uri (OAuth 2.1 要求 RFC 3986 Section 6.2.1)
+        // OAuth 2.1 明确要求精确字符串匹配，不允许重定向URI注册为前缀或模式匹配
+        if (!client.RedirectUris.Any(uri => string.Equals(uri, request.RedirectUri, StringComparison.Ordinal)))
         {
             return new()
             {

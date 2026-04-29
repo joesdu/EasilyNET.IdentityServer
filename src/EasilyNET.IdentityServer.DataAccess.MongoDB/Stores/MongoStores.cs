@@ -86,7 +86,8 @@ public class MongoPersistedGrantStore(IMongoDatabase database) : IPersistedGrant
 
     public async Task<PersistedGrant?> GetAsync(string key, CancellationToken cancellationToken = default)
     {
-        return await Collection.Find(g => g.Key == key).FirstOrDefaultAsync(cancellationToken);
+        var entity = await Collection.Find(g => g.Key == key).FirstOrDefaultAsync(cancellationToken);
+        return entity;
     }
 
     public async Task<IEnumerable<PersistedGrant>> GetAllAsync(PersistedGrantFilter filter, CancellationToken cancellationToken = default)
@@ -110,7 +111,9 @@ public class MongoPersistedGrantStore(IMongoDatabase database) : IPersistedGrant
             filters.Add(builder.Eq(g => g.SessionId, filter.SessionId));
         }
         var combined = filters.Count > 0 ? builder.And(filters) : builder.Empty;
-        return await Collection.Find(combined).ToListAsync(cancellationToken);
+        var entities = await Collection.Find(combined).ToListAsync(cancellationToken);
+        // 过滤掉已消费的授权码，与其他存储保持一致
+        return entities.Where(e => !e.ConsumedTime.HasValue);
     }
 
     public async Task RemoveAsync(string key, CancellationToken cancellationToken = default)
@@ -163,7 +166,10 @@ public class MongoDeviceFlowStore(IMongoDatabase database) : IDeviceFlowStore
 
     public async Task ConsumeDeviceCodeAsync(string deviceCode, CancellationToken cancellationToken = default)
     {
-        await Collection.DeleteOneAsync(d => d.Code == deviceCode, cancellationToken);
+        // 标记为已消费，通过设置 Data = "consumed" 实现，与其他存储保持一致
+        var filter = Builders<DeviceCodeData>.Filter.Eq(d => d.Code, deviceCode);
+        var update = Builders<DeviceCodeData>.Update.Set(d => d.Data, "consumed");
+        await Collection.UpdateOneAsync(filter, update, cancellationToken: cancellationToken);
     }
 
     public async Task RemoveAsync(string deviceCode, CancellationToken cancellationToken = default)
@@ -182,6 +188,7 @@ public class MongoUserConsentStore(IMongoDatabase database) : IUserConsentStore
     public async Task StoreAsync(UserConsent consent, CancellationToken cancellationToken = default)
     {
         var filter = Builders<UserConsent>.Filter.Where(c => c.SubjectId == consent.SubjectId && c.ClientId == consent.ClientId);
+        // 统一使用原始对象存储，让 MongoDB 驱动处理 IEnumerable<string> 的序列化
         await Collection.ReplaceOneAsync(filter, consent, new ReplaceOptions { IsUpsert = true }, cancellationToken);
     }
 

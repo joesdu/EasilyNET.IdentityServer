@@ -17,13 +17,18 @@ namespace EasilyNET.IdentityServer.Core.Services;
 /// <summary>
 /// JWT Token 服务实现
 /// </summary>
-public class TokenService : ITokenService
+public class TokenService : ITokenService, IDisposable
 {
     private readonly ILogger<TokenService> _logger;
     private readonly IdentityServerOptions _options;
     private readonly ConcurrentDictionary<string, DateTime> _revokedTokens = new(StringComparer.Ordinal);
     private readonly ISerializationService _serialization;
     private readonly ISigningService _signingService;
+    private readonly Timer _cleanupTimer;
+    private bool _disposed;
+
+    // 撤销令牌保留时间 (24小时)
+    private static readonly TimeSpan RevokedTokenRetentionPeriod = TimeSpan.FromHours(24);
 
     public TokenService(
         IOptions<IdentityServerOptions> options,
@@ -35,6 +40,13 @@ public class TokenService : ITokenService
         _logger = logger;
         _serialization = serialization;
         _signingService = signingService;
+
+        // 每小时清理过期的撤销记录
+        _cleanupTimer = new Timer(
+            _ => CleanupExpiredRevokedTokens(),
+            null,
+            TimeSpan.FromHours(1),
+            TimeSpan.FromHours(1));
     }
 
     /// <inheritdoc />
@@ -244,6 +256,45 @@ public class TokenService : ITokenService
     private static bool ShouldIssueRefreshToken(TokenRequest request) =>
         request.Client.AllowedGrantTypes.Contains(GrantType.RefreshToken) &&
         request.GrantType is GrantType.AuthorizationCode or GrantType.RefreshToken or GrantType.DeviceCode;
+
+    /// <summary>
+    /// 清理过期的撤销令牌记录，防止内存泄漏
+    /// </summary>
+    private void CleanupExpiredRevokedTokens()
+    {
+        try
+        {
+            var cutoff = DateTime.UtcNow.Subtract(RevokedTokenRetentionPeriod);
+            var expiredKeys = _revokedTokens
+                .Where(kvp => kvp.Value < cutoff)
+                .Select(kvp => kvp.Key)
+                .ToList();
+
+            foreach (var key in expiredKeys)
+            {
+                _revokedTokens.TryRemove(key, out _);
+            }
+
+            if (expiredKeys.Count > 0)
+            {
+                _logger.LogDebug("Cleaned up {Count} expired revoked tokens", expiredKeys.Count);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error cleaning up expired revoked tokens");
+        }
+    }
+
+    /// <summary>
+    /// 销毁清理资源
+    /// </summary>
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        _cleanupTimer?.Dispose();
+    }
 }
 
 /// <summary>

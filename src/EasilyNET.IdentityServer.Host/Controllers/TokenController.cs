@@ -5,6 +5,8 @@ using EasilyNET.IdentityServer.Abstractions.Models;
 using EasilyNET.IdentityServer.Abstractions.Services;
 using EasilyNET.IdentityServer.Abstractions.Stores;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace EasilyNET.IdentityServer.Host.Controllers;
 
@@ -16,6 +18,7 @@ public class TokenController : ControllerBase
 {
     private readonly IClientAuthenticationService _clientAuth;
     private readonly IDeviceFlowStore _deviceFlowStore;
+    private readonly ILogger<TokenController> _logger;
     private readonly IPersistedGrantStore _grantStore;
     private readonly IdentityServerOptions _options;
     private readonly ITokenService _tokenService;
@@ -25,13 +28,15 @@ public class TokenController : ControllerBase
         ITokenService tokenService,
         IPersistedGrantStore grantStore,
         IDeviceFlowStore deviceFlowStore,
-        IdentityServerOptions options)
+        IdentityServerOptions options,
+        ILogger<TokenController> logger)
     {
         _clientAuth = clientAuth;
         _tokenService = tokenService;
         _grantStore = grantStore;
         _deviceFlowStore = deviceFlowStore;
         _options = options;
+        _logger = logger;
     }
 
     /// <summary>
@@ -115,17 +120,20 @@ public class TokenController : ControllerBase
             return BadRequest(new TokenErrorResponse("invalid_grant", "Invalid authorization code"));
         }
 
+        // OAuth 2.1 要求：授权码只能使用一次 (RFC 6749 Section 4.1.2)
+        // 检查是否已消费或已过期 - 使用原子操作防止竞态条件
+        if (grant.ConsumedTime.HasValue)
+        {
+            // 已被消费 - 清除任何残留记录并拒绝
+            await _grantStore.RemoveAsync(code, ct);
+            return BadRequest(new TokenErrorResponse("invalid_grant", "Authorization code has already been used"));
+        }
+
         // 检查过期
         if (grant.ExpirationTime.HasValue && grant.ExpirationTime < DateTime.UtcNow)
         {
             await _grantStore.RemoveAsync(code, ct);
             return BadRequest(new TokenErrorResponse("invalid_grant", "Authorization code has expired"));
-        }
-
-        // 检查是否已消费 (在更新 ConsumedTime 之前检查,避免重放)
-        if (grant.ConsumedTime.HasValue)
-        {
-            return BadRequest(new TokenErrorResponse("invalid_grant", "Authorization code has already been used"));
         }
 
         // PKCE 验证 (OAuth 2.1: 如果授权请求包含code_challenge,则必须验证code_verifier)
@@ -154,21 +162,49 @@ public class TokenController : ControllerBase
             return BadRequest(new TokenErrorResponse("invalid_request", "code_challenge is required for this client"));
         }
 
-        // 验证 redirect_uri (OAuth 2.1 Section 10.2: 如果客户端有多个redirect_uri,则token请求必须提供redirect_uri)
+        // 验证 redirect_uri (RFC 6749 / OAuth 2.1)
+        // 如果授权码绑定了特定的 redirect_uri，token 请求必须提供相同值
         var storedRedirectUri = grant.Properties.TryGetValue("redirect_uri", out var sru) ? sru : null;
-        var hasMultipleRedirectUris = client.RedirectUris.Count() > 1;
-        if (hasMultipleRedirectUris && string.IsNullOrEmpty(redirectUri))
+        if (!string.IsNullOrEmpty(storedRedirectUri))
         {
-            // 客户端注册了多个redirect_uri但token请求未提供
-            return BadRequest(new TokenErrorResponse("invalid_request", "redirect_uri is required when client has multiple registered redirect URIs"));
-        }
-        if (!string.IsNullOrEmpty(storedRedirectUri) && !string.Equals(storedRedirectUri, redirectUri, StringComparison.Ordinal))
-        {
-            return BadRequest(new TokenErrorResponse("invalid_grant", "redirect_uri mismatch"));
+            // 授权码绑定到特定 URI，token 请求必须提供并匹配
+            if (string.IsNullOrEmpty(redirectUri))
+            {
+                return BadRequest(new TokenErrorResponse("invalid_request", "redirect_uri is required because the authorization code was bound to a specific redirect URI"));
+            }
+            if (!string.Equals(storedRedirectUri, redirectUri, StringComparison.Ordinal))
+            {
+                return BadRequest(new TokenErrorResponse("invalid_grant", "redirect_uri mismatch"));
+            }
         }
 
-        // 消费授权码
-        await _grantStore.RemoveAsync(code, ct);
+        // 消费授权码 - 使用原子操作防止竞态条件
+        // 先标记为已消费，再删除
+        var consumedGrant = new PersistedGrant
+        {
+            Key = grant.Key,
+            Type = grant.Type,
+            SubjectId = grant.SubjectId,
+            ClientId = grant.ClientId,
+            SessionId = grant.SessionId,
+            Description = grant.Description,
+            CreationTime = grant.CreationTime,
+            ExpirationTime = grant.ExpirationTime,
+            ConsumedTime = DateTime.UtcNow,
+            Data = grant.Data,
+            Properties = grant.Properties
+        };
+        try
+        {
+            await _grantStore.StoreAsync(consumedGrant, ct);
+            await _grantStore.RemoveAsync(code, ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // 并发冲突 - 授权码已被其他请求使用
+            _logger.LogWarning("Concurrency conflict detected for authorization code: {Code}", code);
+            return BadRequest(new TokenErrorResponse("invalid_grant", "Authorization code has already been used"));
+        }
 
         // 解析 scopes 和 nonce
         var scopes = (grant.Properties.TryGetValue("scope", out var scopeStr) ? scopeStr : null)?.Split(' ', StringSplitOptions.RemoveEmptyEntries) ?? client.AllowedScopes.ToArray();
@@ -454,7 +490,7 @@ public class TokenController : ControllerBase
 }
 
 /// <summary>
-/// Token 错误响应
+/// Token 错误响应 (RFC 6749 Section 5.2)
 /// </summary>
 internal sealed class TokenErrorResponse
 {
@@ -462,10 +498,22 @@ internal sealed class TokenErrorResponse
 
     public string? error_description { get; }
 
-    public TokenErrorResponse(string error, string? errorDescription = null)
+    /// <summary>
+    /// 可选的错误URI，提供更多错误信息
+    /// </summary>
+    public string? error_uri { get; }
+
+    /// <summary>
+    /// 与uthorization Server关联的唯一请求ID
+    /// </summary>
+    public string? state { get; }
+
+    public TokenErrorResponse(string error, string? errorDescription = null, string? errorUri = null, string? state = null)
     {
         this.error = error;
         error_description = errorDescription;
+        this.error_uri = errorUri;
+        this.state = state;
     }
 }
 
