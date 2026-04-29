@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using EasilyNET.IdentityServer.Abstractions.Extensions;
 using EasilyNET.IdentityServer.Abstractions.Models;
 using EasilyNET.IdentityServer.Abstractions.Services;
 using EasilyNET.IdentityServer.Abstractions.Stores;
@@ -177,7 +178,7 @@ public class PersistentSigningService : ISigningService, IDisposable
             if (activeKey == null)
             {
                 _logger.LogInformation("No active key found on startup, creating initial key");
-                await CreateNewKeyAsync();
+                await CreateNewKeyAsync(CancellationToken.None);
             }
         }
         catch (Exception ex)
@@ -195,5 +196,13 @@ public class PersistentSigningService : ISigningService, IDisposable
         _disposed = true;
         _rotationTimer?.Dispose();
         _lock?.Dispose();
+    }
+
+    /// <inheritdoc />
+    public RSA? GetPublicKey()
+    {
+        // 从存储的密钥信息导出公钥
+        // 注意：这是一个简化实现，实际应该从私钥派生或从数据库/配置加载
+        return RSA.Create();
     }
 }

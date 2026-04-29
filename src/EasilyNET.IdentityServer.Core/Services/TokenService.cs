@@ -86,13 +86,17 @@ public class TokenService : ITokenService, IDisposable
                 claims.Add(new(claim.Key, claim.Value.ToString() ?? ""));
             }
         }
+        // 构建 access token 的受众声明 (aud)
+        // OAuth 2.1: aud 应该是接收该 token 的资源服务器的标识符
+        // 通常是 API 资源或 issuer 本身
+        var audience = string.Join(" ", scopes);
         var tokenDescriptor = new SecurityTokenDescriptor
         {
             Subject = new(claims),
             IssuedAt = now,
             Expires = expires,
             Issuer = _options.Issuer,
-            Audience = string.Join(" ", scopes), // 使用 scopes 作为 audience
+            Audience = audience,
             SigningCredentials = signingKey.Credentials
         };
         var tokenHandler = new JwtSecurityTokenHandler();
@@ -208,23 +212,40 @@ public class TokenService : ITokenService, IDisposable
             }
             var signingKey = await _signingService.GetSigningKeyAsync(cancellationToken);
             var tokenHandler = new JwtSecurityTokenHandler();
+
+            // 第一步：先解析 token 获取 scopes（不验证 audience）
+            var preliminaryParameters = new TokenValidationParameters
+            {
+                ValidateIssuerSigningKey = true,
+                IssuerSigningKey = signingKey.Key,
+                ValidateIssuer = true,
+                ValidIssuer = _options.Issuer,
+                ValidateAudience = false,
+                ValidateLifetime = true,
+                ClockSkew = TimeSpan.Zero
+            };
+            var principal = tokenHandler.ValidateToken(token, preliminaryParameters, out var validatedToken);
+            var scopes = principal.FindAll("scope").Select(x => x.Value).Distinct(StringComparer.Ordinal).ToArray();
+
+            // 第二步：用解析出的 scopes 作为 audience 进行完整验证
             var validationParameters = new TokenValidationParameters
             {
                 ValidateIssuerSigningKey = true,
                 IssuerSigningKey = signingKey.Key,
                 ValidateIssuer = true,
                 ValidIssuer = _options.Issuer,
-                ValidateAudience = false, // 不验证 audience,因为我们使用 scopes
+                ValidateAudience = true,
+                ValidAudience = string.Join(" ", scopes),
                 ValidateLifetime = true,
                 ClockSkew = TimeSpan.Zero
             };
-            var principal = tokenHandler.ValidateToken(token, validationParameters, out var validatedToken);
+            // 重新验证带 audience
+            principal = tokenHandler.ValidateToken(token, validationParameters, out validatedToken);
             var clientId = principal.FindFirst("client_id")?.Value;
             var subjectId = principal.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
-            var scopes = principal.FindAll("scope").Select(x => x.Value).Distinct(StringComparer.Ordinal).ToArray();
-            DateTime? expirationTime = validatedToken.ValidTo == DateTime.MinValue
+            DateTime? expirationTime = validatedToken?.ValidTo == DateTime.MinValue
                                            ? null
-                                           : validatedToken.ValidTo;
+                                           : validatedToken?.ValidTo;
             return new()
             {
                 IsValid = true,
@@ -321,36 +342,6 @@ public class DefaultTokenResponseGenerator : ITokenResponseGenerator
 }
 
 /// <summary>
-/// 签名服务接口
-/// </summary>
-public interface ISigningService
-{
-    Task<SigningKeyResult> GetSigningKeyAsync(CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// 获取RSA公钥用于JWKS暴露
-    /// </summary>
-    RSA? GetPublicKey();
-}
-
-/// <summary>
-/// 签名密钥结果
-/// </summary>
-public class SigningKeyResult
-{
-    public SigningCredentials Credentials { get; init; } = default!;
-
-    public SecurityKey Key { get; init; } = default!;
-
-    public string? KeyId { get; init; }
-
-    /// <summary>
-    /// 签名算法
-    /// </summary>
-    public string Algorithm { get; init; } = "RS256";
-}
-
-/// <summary>
 /// 默认签名服务 (开发环境使用)
 /// </summary>
 public class DefaultSigningService : ISigningService
@@ -391,6 +382,26 @@ public class DefaultSigningService : ISigningService
     /// 获取RSA公钥用于JWKS暴露
     /// </summary>
     public RSA? GetPublicKey() => _cachedRsa;
+
+    /// <summary>
+    /// 获取所有有效签名密钥（用于 JWKS）
+    /// </summary>
+    public Task<IEnumerable<SigningKeyResult>> GetAllSigningKeysAsync(CancellationToken cancellationToken = default)
+    {
+        if (_cachedKey == null)
+        {
+            return Task.FromResult<IEnumerable<SigningKeyResult>>(Array.Empty<SigningKeyResult>());
+        }
+        return Task.FromResult<IEnumerable<SigningKeyResult>>(new[] { new SigningKeyResult { Key = _cachedKey, Credentials = _cachedCredentials!, KeyId = _cachedKey.KeyId, Algorithm = SecurityAlgorithms.RsaSha256 } });
+    }
+
+    /// <summary>
+    /// 轮换签名密钥 (开发环境不支持)
+    /// </summary>
+    public Task RotateKeysAsync(CancellationToken cancellationToken = default)
+    {
+        return Task.CompletedTask;
+    }
 
     /// <summary>
     /// 销毁密钥资源

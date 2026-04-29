@@ -50,6 +50,18 @@ public class AuthorizeController : ControllerBase
         string? login_hint,
         CancellationToken cancellationToken)
     {
+        // 添加点击劫持保护 (OAuth 2.1 安全要求)
+        // X-Frame-Options: 防止页面在 iframe 中渲染
+        Response.Headers.XFrameOptions = "DENY";
+        // Content-Security-Policy: 更严格的防护
+        Response.Headers.ContentSecurityPolicy = "frame-ancestors 'none'";
+        // X-Content-Type-Options: 防止 MIME 类型嗅探
+        Response.Headers.XContentTypeOptions = "nosniff";
+        // X-XSS-Protection: 传统 XSS 防护 (现代浏览器已内置)
+        Response.Headers.XXSSProtection = "1; mode=block";
+        // Referrer-Policy: 控制引用来源信息
+        Response.Headers["Referrer-Policy"] = "no-referrer";
+
         if (string.IsNullOrEmpty(client_id))
         {
             return BadRequest(new { error = "invalid_request", error_description = "client_id is required" });

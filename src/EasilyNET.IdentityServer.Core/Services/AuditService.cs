@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using EasilyNET.IdentityServer.Abstractions.Models;
 using EasilyNET.IdentityServer.Abstractions.Services;
 using EasilyNET.IdentityServer.Abstractions.Stores;
 using Microsoft.AspNetCore.Http;
@@ -136,7 +137,7 @@ public class AuditService : IAuditService
 
     private string? GetUserAgent()
     {
-        return _httpContextAccessor.HttpContext?.Request.Headers.UserAgent.FirstOrDefault();
+        return _httpContextAccessor.HttpContext?.Request.Headers["User-Agent"].FirstOrDefault();
     }
 
     private string? GetRequestPath()

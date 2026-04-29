@@ -275,27 +275,54 @@ public class TokenController : ControllerBase
             return BadRequest(new TokenErrorResponse("invalid_scope", "Requested scope exceeds the originally granted scope"));
         }
 
+        // OAuth 2.1: 公开客户端不应使用刷新令牌轮换
+        // 公开客户端使用一次性刷新令牌模式，删除旧令牌但不颁发新令牌
+        var isPublicClient = client.ClientType == ClientType.Public || !client.RequireClientSecret;
+        if (isPublicClient)
+        {
+            // 公开客户端：删除旧刷新令牌但不颁发新的（一次性刷新令牌）
+            await _grantStore.RemoveAsync(refreshToken, ct);
+            var nonce = grant.Properties.TryGetValue("nonce", out var n) ? n : null;
+            var result = await _tokenService.CreateAccessTokenAsync(new()
+            {
+                Client = client,
+                GrantType = GrantType.RefreshToken,
+                Scopes = scopes,
+                SubjectId = grant.SubjectId,
+                Nonce = nonce
+            }, ct);
+
+            // 记录审计日志
+            await _auditService.LogRefreshTokenUsedAsync(client.ClientId, grant.SubjectId, false, GetClientIpAddress(), ct);
+            await _auditService.LogTokenIssuedAsync(client.ClientId, grant.SubjectId, GrantType.RefreshToken,
+                scopes, GetClientIpAddress(), ct);
+
+            // 返回不包含 refresh_token 的响应
+            return Ok(new PublicClientTokenResponse(result));
+        }
+
+        // 机密客户端：使用标准滑动窗口刷新令牌（轮换机制）
         // Refresh Token 轮换 (OAuth 2.1 要求)
         await _grantStore.RemoveAsync(refreshToken, ct);
-        var nonce = grant.Properties.TryGetValue("nonce", out var n) ? n : null;
-        var result = await _tokenService.CreateAccessTokenAsync(new()
+        var refreshNonce = grant.Properties.TryGetValue("nonce", out var rn) ? rn : null;
+        var tokenResult = await _tokenService.CreateAccessTokenAsync(new()
         {
             Client = client,
             GrantType = GrantType.RefreshToken,
             Scopes = scopes,
             SubjectId = grant.SubjectId,
-            Nonce = nonce
+            Nonce = refreshNonce
         }, ct);
 
         // 存储新的 Refresh Token
-        await StoreRefreshTokenGrantAsync(client, grant.SubjectId, scopes, result, nonce, ct);
+        await StoreRefreshTokenGrantAsync(client, grant.SubjectId, scopes, tokenResult, refreshNonce, ct);
 
         // 记录审计日志
         await _auditService.LogRefreshTokenUsedAsync(client.ClientId, grant.SubjectId, true, GetClientIpAddress(), ct);
         await _auditService.LogTokenIssuedAsync(client.ClientId, grant.SubjectId, GrantType.RefreshToken,
             scopes, GetClientIpAddress(), ct);
 
-        return Ok(new TokenSuccessResponse(result));
+        return Ok(new TokenSuccessResponse(tokenResult));
     }
 
     private async Task<IActionResult> HandleDeviceCode(Client client, IFormCollection form, CancellationToken ct)
@@ -576,6 +603,36 @@ internal sealed class TokenSuccessResponse
         token_type = result.TokenType;
         expires_in = result.ExpiresIn;
         refresh_token = result.RefreshToken;
+        scope = result.Scope;
+        id_token = result.IdToken;
+    }
+}
+
+/// <summary>
+/// 公开客户端 Token 响应（不包含刷新令牌，OAuth 2.1 规范）
+/// </summary>
+internal sealed class PublicClientTokenResponse
+{
+    public string access_token { get; }
+
+    public int expires_in { get; }
+
+    public string? id_token { get; }
+
+    public string? scope { get; }
+
+    public string token_type { get; }
+
+    /// <summary>
+    /// 公开客户端不颁发刷新令牌（OAuth 2.1 要求）
+    /// </summary>
+    public string? refresh_token => null;
+
+    public PublicClientTokenResponse(TokenResult result)
+    {
+        access_token = result.AccessToken;
+        token_type = result.TokenType;
+        expires_in = result.ExpiresIn;
         scope = result.Scope;
         id_token = result.IdToken;
     }

@@ -31,7 +31,10 @@ public class IntrospectionController : ControllerBase
         var authResult = await AuthenticateClientAsync(form, cancellationToken);
         if (!authResult.IsSuccess)
         {
-            return Unauthorized(new { error = "invalid_client" });
+            // RFC 7662: 客户端认证失败时返回 401 + WWW-Authenticate 头
+            Response.StatusCode = 401;
+            Response.Headers.WWWAuthenticate = "Bearer realm=\"introspection\"";
+            return new JsonResult(new { error = "invalid_client" }) { StatusCode = 401 };
         }
         var token = form["token"].ToString();
         if (string.IsNullOrEmpty(token))

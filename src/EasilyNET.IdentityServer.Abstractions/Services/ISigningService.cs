@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using Microsoft.IdentityModel.Tokens;
 
 namespace EasilyNET.IdentityServer.Abstractions.Services;
@@ -21,6 +22,11 @@ public interface ISigningService
     /// 轮换签名密钥
     /// </summary>
     Task RotateKeysAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 获取RSA公钥用于JWKS暴露
+    /// </summary>
+    RSA? GetPublicKey();
 }
 
 /// <summary>

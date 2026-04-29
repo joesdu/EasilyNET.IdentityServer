@@ -1,6 +1,5 @@
 using EasilyNET.IdentityServer.Abstractions.Models;
 using EasilyNET.IdentityServer.Abstractions.Stores;
-using EasilyNET.IdentityServer.DataAccess.Abstractions;
 using EasilyNET.IdentityServer.DataAccess.EFCore.Entities;
 using Microsoft.EntityFrameworkCore;
 
@@ -11,9 +10,9 @@ namespace EasilyNET.IdentityServer.DataAccess.EFCore.Stores;
 /// </summary>
 public class EfSigningKeyStore : ISigningKeyStore
 {
-    private readonly IIdentityServerDbContext _context;
+    private readonly IdentityServerDbContext _context;
 
-    public EfSigningKeyStore(IIdentityServerDbContext context)
+    public EfSigningKeyStore(IdentityServerDbContext context)
     {
         _context = context;
     }

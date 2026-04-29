@@ -69,6 +69,7 @@ public class DeviceAuthorizationController : ControllerBase
         var deviceCode = GenerateCode(32);
         var userCode = GenerateUserCode();
         var lifetime = client.DeviceCodeLifetime > 0 ? client.DeviceCodeLifetime : _options.DeviceCodeLifetime;
+        var interval = client.DevicePollingInterval > 0 ? client.DevicePollingInterval : DefaultPollingIntervalSeconds;
         var deviceCodeData = new DeviceCodeData
         {
             Code = deviceCode,
@@ -80,7 +81,7 @@ public class DeviceAuthorizationController : ControllerBase
             Properties = new Dictionary<string, string>
             {
                 ["scope"] = string.Join(" ", requestedScopes),
-                ["interval_seconds"] = DefaultPollingIntervalSeconds.ToString(),
+                ["interval_seconds"] = interval.ToString(),
             }
         };
         await _deviceFlowStore.StoreAsync(deviceCodeData, ct);
@@ -92,7 +93,7 @@ public class DeviceAuthorizationController : ControllerBase
             verification_uri = $"{issuer}/device",
             verification_uri_complete = $"{issuer}/device?user_code={userCode}",
             expires_in = lifetime,
-            interval = DefaultPollingIntervalSeconds
+            interval = interval
         });
     }
 

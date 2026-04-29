@@ -101,6 +101,11 @@ public class Client
     public int? DeviceCodeLifetimeValue { get; init; }
 
     /// <summary>
+    /// 设备流轮询间隔（秒）
+    /// </summary>
+    public int DevicePollingInterval { get; init; }
+
+    /// <summary>
     /// 是否启用
     /// </summary>
     public bool Enabled { get; init; } = true;

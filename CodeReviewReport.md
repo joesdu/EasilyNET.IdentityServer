@@ -1,505 +1,288 @@
 # EasilyNET.IdentityServer 代码审查报告
 
-**审查日期**: 2026年4月29日  
-**审查范围**: OAuth 2.1 协议实现合规性、安全性、代码质量  
-**参考规范**: draft-ietf-oauth-v2-1-15
+**审查日期**: 2026年4月29日
+**审查范围**: OAuth 2.1 协议实现合规性、安全性、数据库持久化
+**参考规范**: draft-ietf-oauth-v2-1-15 + 相关 RFC 规范
 
 ---
 
-## 1. 执行摘要
+## 执行摘要
 
-EasilyNET.IdentityServer 是一个基于 .NET 的 OAuth 2.1 授权服务器实现。整体架构设计合理，代码结构清晰，对 OAuth 2.1 规范有较好的遵循。但在安全性、错误处理、测试覆盖等方面仍有改进空间。
+EasilyNET.IdentityServer 是一个基于 .NET 的 OAuth 2.1 授权服务器实现。整体架构设计合理，代码结构清晰，对 OAuth 2.1 规范有较好的遵循。
 
-**总体评分**: 7.5/10
+**总体评分**: 8/10
 
----
+### 亮点
+- ✅ 核心 Grant Type 完整实现（授权码+PKCE、客户端凭证、刷新令牌、设备流）
+- ✅ 数据库持久化完整（EF Core + MongoDB，支持多种数据库）
+- ✅ 安全措施良好（常量时间比较、PKCE 强制、并发控制）
+- ✅ 代码分层清晰，依赖注入正确使用
 
-## 2. 符合 OAuth 2.1 规范的亮点
-
-### 2.1 授权码流程 (Authorization Code Grant) ✅
-
-**实现位置**: `TokenController.cs`, `AuthorizeController.cs`
-
-**符合规范的方面**:
-- ✅ 强制使用 PKCE (code_challenge 和 code_verifier)
-- ✅ 授权码一次性使用（已消费检测）
-- ✅ 授权码过期时间控制（默认300秒）
-- ✅ 精确的 redirect_uri 字符串匹配
-- ✅ 授权响应包含 `iss` 参数（混消攻击防护）
-- ✅ 支持 `state` 参数用于 CSRF 防护
-
-```csharp
-// TokenController.cs - 授权码使用检测
-if (grant.ConsumedTime.HasValue)
-{
-    await _grantStore.RemoveAsync(code, ct);
-    return BadRequest(new TokenErrorResponse("invalid_grant", "Authorization code has already been used"));
-}
-```
-
-### 2.2 令牌端点 (Token Endpoint) ✅
-
-**实现位置**: `TokenController.cs`
-
-**符合规范的方面**:
-- ✅ 支持所有必需的授权类型：authorization_code, client_credentials, refresh_token
-- ✅ 支持设备授权码流程 (RFC 8628)
-- ✅ 客户端认证支持 Basic Auth 和 POST body
-- ✅ 令牌响应包含 Cache-Control: no-store 头
-- ✅ 返回标准的错误响应格式
-
-### 2.3 刷新令牌 (Refresh Token) ✅
-
-**实现位置**: `TokenController.cs` (HandleRefreshToken 方法)
-
-**符合规范的方面**:
-- ✅ 刷新令牌轮换（Rotation）实现
-- ✅ 旧刷新令牌使用后失效
-- ✅ 支持缩小 scope 的刷新请求
-- ✅ 防止 scope 扩大攻击
-
-```csharp
-// Refresh Token 轮换实现
-await _grantStore.RemoveAsync(refreshToken, ct); // 立即删除旧令牌
-var result = await _tokenService.CreateAccessTokenAsync(...);
-await StoreRefreshTokenGrantAsync(...); // 存储新令牌
-```
-
-### 2.4 发现端点 (Discovery Endpoint) ✅
-
-**实现位置**: `DiscoveryController.cs`
-
-**符合规范的方面**:
-- ✅ 实现 RFC 8414 (OAuth 2.0 Authorization Server Metadata)
-- ✅ 返回所有必需的端点信息
-- ✅ 返回支持的 grant_types 和 scopes
-- ✅ JWKS 端点暴露公钥
-
-### 2.5 安全性措施 ✅
-
-**实现位置**: 多个文件
-
-**符合规范的方面**:
-- ✅ 客户端密钥使用常量时间比较（防时序攻击）
-- ✅ PKCE S256 方法支持
-- ✅ 安全响应头（CSP, X-Frame-Options, X-Content-Type-Options）
-- ✅ 授权码并发使用保护（DbUpdateConcurrencyException 处理）
-
-```csharp
-// ClientAuthenticationService.cs - 常量时间比较
-private static bool FixedTimeEquals(string a, string b)
-{
-    var bytesA = Encoding.UTF8.GetBytes(a);
-    var bytesB = Encoding.UTF8.GetBytes(b);
-    return CryptographicOperations.FixedTimeEquals(bytesA, bytesB);
-}
-```
+### 主要问题
+- 🔴 **Access Token 缺少 `aud` 声明**（RFC 7.1.3.6 要求）
+- 🔴 **Introspection 端点返回格式错误**（RFC 7662 要求 401 + WWW-Authenticate）
+- 🟡 **点击劫持保护缺失**（X-Frame-Options, CSP headers）
+- 🟡 **公开客户端刷新令牌安全机制未实现**
+- 🟡 **Discovery 文档缺少多个推荐字段
 
 ---
 
-## 3. 不符合规范或需要改进的问题
+## 一、Grant Types 实现检查 (04-grant-types)
 
-### 3.1 🔴 高风险问题
+### ✅ 1.1 授权码许可 (Authorization Code)
 
-#### 3.1.1 授权码过期时间过短
+| 要求 | 状态 | 位置 |
+|------|------|------|
+| PKCE 支持 (S256/plain) | ✅ | TokenController:484-499 |
+| code_challenge 强制 | ✅ | AuthorizationService:88-96 |
+| 授权码单次使用 | ✅ | TokenController:133-147 |
+| 授权码有效期验证 | ✅ | TokenController:142-147 |
+| code_verifier 验证 | ✅ | TokenController:149-173 |
+| 授权码绑定 client_id | ✅ | AuthorizationService:165 |
+| 授权码绑定 code_challenge | ✅ | AuthorizationService:175 |
 
-**问题描述**: 授权码生命周期默认为 300 秒（5 分钟），OAuth 2.1 建议最大为 10 分钟，但某些场景可能需要更短。
+### ✅ 1.2 客户端凭证许可 (Client Credentials)
 
-**当前代码**:
-```csharp
-// IdentityServerOptions.cs
-public int AuthorizationCodeLifetime { get; set; } = 300; // 5分钟
-```
+| 要求 | 状态 | 位置 |
+|------|------|------|
+| 仅限机密客户端 | ✅ | ClientAuthenticationService:71-96 |
+| 客户端认证 | ✅ | TokenController:59-75 |
+| scope 验证 | ✅ | TokenController:94-101 |
 
-**建议**: 
-- 考虑缩短至 60-120 秒以减小攻击窗口
-- 添加配置验证确保不超过 600 秒
+### ✅ 1.3 刷新令牌许可 (Refresh Token)
 
-#### 3.1.2 设备流缺乏速率限制
+| 要求 | 状态 | 位置 |
+|------|------|------|
+| 刷新令牌轮换 | ✅ | TokenController:278-291 |
+| scope 限制 | ✅ | TokenController:270-276 |
+| 绝对生命周期 | ✅ | TokenController:259-268 |
+| 客户端绑定验证 | ✅ | TokenController:248-252 |
 
-**问题描述**: 设备 流 polling 速率限制仅在内存中存储，重启后丢失。
+**问题**: 公开客户端的刷新令牌必须是发送者约束或一次性的 (RFC 9700 4.14.2)，当前实现未区分
 
-**当前代码**:
-```csharp
-// DeviceAuthorizationController.cs
-// 轮询间隔存储在 Properties 字典中，重启后丢失
-```
+### ✅ 1.4 设备授权许可 (RFC 8628)
 
-**建议**: 
-- 使用分布式缓存或数据库持久化 polling 状态
-- 实现全局速率限制（如 IP 级别的限制）
+| 要求 | 状态 | 位置 |
+|------|------|------|
+| device_code 生成 | ✅ | DeviceAuthorizationController:142-149 |
+| user_code 生成 | ✅ | DeviceAuthorizationController:151-162 |
+| 轮询间隔控制 | ⚠️ | 部分实现 |
+| authorization_pending | ✅ | TokenController:340-342 |
+| slow_down 错误 | ✅ | TokenController:398-401 |
 
-#### 3.1.3 JWT 签名密钥生命周期管理
-
-**问题描述**: `DefaultSigningService` 使用内存中的 RSA 密钥，重启后密钥丢失，所有已颁发的令牌失效。
-
-**当前代码**:
-```csharp
-// TokenService.cs - DefaultSigningService
-private RSA? _cachedRsa; // 内存中的密钥
-```
-
-**建议**:
-- 实现密钥持久化（数据库/文件系统）
-- 支持密钥轮换
-- 使用安全的密钥管理系统（如 Azure Key Vault, AWS KMS）
-
-### 3.2 🟡 中风险问题
-
-#### 3.2.1 缺少 UserInfo 端点
-
-**问题描述**: 作为 OpenID Connect 实现，缺少 `/connect/userinfo` 端点。
-
-**OAuth 2.1 / OIDC 要求**: OIDC 规范要求提供 UserInfo 端点。
-
-**建议**: 添加 UserInfoController:
-```csharp
-[HttpGet("/connect/userinfo")]
-public async Task<IActionResult> GetUserInfo([FromHeader] string authorization)
-{
-    // 验证 access token
-    // 返回用户 claims
-}
-```
-
-#### 3.2.2 缺少 Back-Channel Logout 实现
-
-**问题描述**: 虽然模型中有 `BackChannelLogoutUris` 字段，但没有实际的 logout 端点实现。
-
-**建议**: 实现 `/connect/backchannel-logout` 和 `/connect/end_session` 端点。
-
-#### 3.2.3 客户端密钥存储明文
-
-**问题描述**: 内存存储中的客户端密钥以明文形式存储，没有使用哈希。
-
-**当前代码**:
-```csharp
-// InMemoryStores.cs
-ClientSecrets = [new() { Value = "secret", Description = "MVC Client Secret" }],
-```
-
-**建议**:
-- 使用 SHA-256 哈希存储密钥
-- 实现密钥版本管理
-
-#### 3.2.4 缺少审计日志
-
-**问题描述**: 没有系统性的审计日志记录所有安全相关事件（令牌颁发、撤销、失败认证等）。
-
-**建议**:
-- 添加审计日志中间件
-- 记录：客户端 ID、用户 ID、IP 地址、操作类型、时间戳、结果
-
-### 3.3 🟢 低风险/改进建议
-
-#### 3.3.1 授权端点不支持 POST 方法
-
-**OAuth 2.1 规范**: "授权服务器必须支持在授权端点上使用 HTTP GET 方法，也可以支持 POST 方法"
-
-**当前代码**:
-```csharp
-// AuthorizeController.cs
-[HttpGet("/connect/authorize")] // 仅支持 GET
-```
-
-**建议**: 添加 POST 方法支持。
-
-#### 3.3.2 缺少 CORS 预检处理
-
-**问题描述**: 令牌端点没有显式处理 OPTIONS 预检请求。
-
-**建议**: 添加 CORS 中间件配置。
-
-#### 3.3.3 错误响应不一致
-
-**问题描述**: 某些错误返回 BadRequest，某些返回特定的 OAuth 错误码，缺乏一致性。
-
-**建议**: 统一使用 OAuth 2.1 标准错误响应格式。
+**问题**: `authorization_pending` 应在轮询间隔未到时返回，而不是立即返回
 
 ---
 
-## 4. 代码质量问题
+## 二、协议端点检查 (03-protocol-endpoints)
 
-### 4.1 ✅ 优秀的实践
+### ✅ 2.1 授权端点 `/connect/authorize`
 
-1. **依赖注入**: 正确使用 DI 容器管理服务生命周期
-2. **异步编程**: 正确使用 async/await 模式
-3. **CancellationToken**: 正确传递取消令牌
-4. **不可变对象**: 使用 init-only 属性
-5. **并发安全**: InMemoryStores 使用 lock 和 ConcurrentDictionary
+| 要求 | 状态 | 位置 |
+|------|------|------|
+| response_type=code | ✅ | AuthorizationService:41-50 |
+| redirect_uri 精确匹配 | ✅ | AuthorizationService:77 |
+| state 参数 | ✅ | AuthorizeController:40 |
+| nonce 参数 | ✅ | AuthorizeController:42 |
+| code_challenge 强制 | ✅ | AuthorizationService:88-96 |
+| prompt 参数 | ✅ | AuthorizeController:110-131 |
+| scope 验证 | ✅ | AuthorizationService:111-127 |
 
-### 4.2 ⚠️ 需要改进的地方
+**问题**: 缺少点击劫持保护头 (X-Frame-Options, CSP)
 
-#### 4.2.1 硬编码值
+### ✅ 2.2 令牌端点 `/connect/token`
 
-**问题**:
+| 要求 | 状态 | 位置 |
+|------|------|------|
+| POST 方法 | ✅ | TokenController:48 |
+| Basic Auth 支持 | ✅ | TokenController:467-478 |
+| client_secret_post 支持 | ✅ | TokenController:480-481 |
+| Cache-Control: no-store | ✅ | TokenController:520 |
+| JSON 响应格式 | ✅ | TokenSuccessResponse |
+
+### 🟡 2.3 Discovery 端点
+
+**问题**: 缺少以下推荐字段
+- `authorization_response_iss_parameter_supported` (RFC 9207)
+- `check_iframe`
+- `pushed_authorization_request_endpoint`
+- `require_signed_request_object`
+
+### 🔴 2.4 Introspection 端点 - RFC 7662
+
+| 要求 | 状态 | 问题 |
+|------|------|------|
+| client_id 匹配检查 | ✅ | ✅ |
+
+**严重问题**: RFC 7662 Section 2.2 要求无效 token 返回 **401 + WWW-Authenticate 头**，当前实现只返回 `{ active: false }` + 200
+
+### ✅ 2.5 Revocation 端点 - RFC 7009
+
+| 要求 | 状态 |
+|------|------|
+| token_type_hint 支持 | ✅ |
+| 始终返回 200 | ✅ |
+
+---
+
+## 三、安全考虑检查 (07-security-considerations)
+
+### ✅ 3.1 授权码安全
+
+| 要求 | 状态 |
+|------|------|
+| 防止授权码注入 (PKCE) | ✅ |
+| 防止授权码重用 | ✅ |
+| 常量时间 Secret 比较 | ✅ |
+| 并发控制 (RowVersion) | ✅ |
+
+### 🔴 3.2 访问令牌安全
+
+**严重问题**: Access Token 缺少 `aud` (受众) 声明
+
+当前实现 (TokenService.cs:95):
 ```csharp
-// DiscoveryController.cs
-["kid"] = "rsa-key-1", // 硬编码密钥 ID
+Audience = string.Join(" ", scopes), // 使用 scopes 作为 audience
 ```
 
-**建议**: 从配置中读取或使用密钥指纹生成。
+规范要求 (RFC 7.1.3.6):
+> 访问令牌应限制为某些资源服务器（受众限制）
 
-#### 4.2.2 魔法数字
+### 🔴 3.3 点击劫持保护
 
-**问题**:
-```csharp
-// TokenService.cs
-private static readonly TimeSpan RevokedTokenRetentionPeriod = TimeSpan.FromHours(24);
+**问题**: 授权端点缺少以下响应头
+- `X-Frame-Options`
+- `Content-Security-Policy` (frame-ancestors)
 
-// 多处硬编码 512 字符限制
-if (state.Length > 512)
-```
+规范要求 (RFC 7.10):
+> 授权服务器必须防止点击劫持攻击
 
-**建议**: 提取为常量或配置项。
+### ⚠️ 3.4 公开客户端刷新令牌
 
-#### 4.2.3 缺少 XML 文档
+**问题**: RFC 9700 4.14.2 要求公开客户端的刷新令牌必须是：
+- 发送者约束 (DPoP/mTLS)，或
+- 一次性的 (轮换)
 
-**问题**: 部分公共 API 缺少 XML 文档注释。
-
-**建议**: 为所有公共类和方法添加 XML 文档。
-
-#### 4.2.4 测试覆盖不足
-
-**当前状态**:
-- 集成测试仅有一个文件
-- 缺少单元测试
-- 没有性能测试
-- 没有安全测试（如 PKCE 绕过尝试）
-
-**建议**:
-```
-测试覆盖率目标:
-- 单元测试: > 80%
-- 集成测试: 覆盖所有端点
-- 安全测试: 攻击场景模拟
-```
+当前实现只做了轮换，但没有对公开客户端加强安全
 
 ---
 
-## 5. 架构评价
+## 四、数据库持久化检查
 
-### 5.1 ✅ 优点
+### ✅ 4.1 EF Core 实体完整性
 
-1. **分层清晰**: Abstractions → Core → DataAccess → Host 的层次结构合理
-2. **可插拔存储**: 支持内存、EF Core、MongoDB 多种存储后端
-3. **配置灵活**: IdentityServerOptions 提供丰富的配置选项
-4. **扩展性**: 通过接口和 DI 支持扩展
+| 实体 | 状态 | 说明 |
+|------|------|------|
+| ClientEntity | ✅ | 完整，包含所有子实体 |
+| PersistedGrantEntity | ✅ | 包含 RowVersion 用于并发控制 |
+| DeviceCodeEntity | ✅ | 完整 |
+| UserConsentEntity | ✅ | 完整 |
+| ApiResourceEntity | ✅ | 完整 |
+| SigningKeyEntity | ✅ | 完整 |
 
-### 5.2 ⚠️ 建议
+### ✅ 4.2 数据库索引
 
-1. **添加中间件管道**: 将安全头、日志、审计等提取为中间件
-2. **事件系统**: 添加领域事件（TokenIssued, TokenRevoked 等）
-3. **健康检查**: 增强健康检查端点，检查数据库连接等
+所有必要的索引都已配置：
+- ClientId 唯一索引
+- PersistedGrant 复合索引 (SubjectId, ClientId, Type)
+- DeviceCode DeviceCode/UserCode 唯一索引
 
----
+### ✅ 4.3 EF Core Store 实现
 
-## 6. 安全建议
+| Store | 状态 |
+|-------|------|
+| EfClientStore | ✅ |
+| EfPersistedGrantStore | ✅ |
+| EfDeviceFlowStore | ✅ |
+| EfResourceStore | ✅ |
+| EfUserConsentStore | ✅ |
 
-### 6.1 立即执行
+### ✅ 4.4 MongoDB Store 实现
 
-1. **密钥管理**:
-   ```csharp
-   // 使用证书或密钥管理服务
-   public class KeyManagementService : ISigningService
-   {
-       private readonly IKeyStore _keyStore;
-       // 实现密钥轮换
-   }
-   ```
+| Store | 状态 |
+|-------|------|
+| MongoStores | ✅ |
 
-2. **审计日志**:
-   ```csharp
-   public class AuditMiddleware
-   {
-       // 记录所有 OAuth 操作
-   }
-   ```
-
-3. **速率限制**:
-   ```csharp
-   // 使用 AspNetCoreRateLimit 包
-   services.AddRateLimiting(options =>
-   {
-       options.AddPolicy("token_endpoint", ...);
-   });
-   ```
-
-### 6.2 短期执行（1-3 个月）
-
-1. 实现完整的 OIDC 支持（UserInfo、EndSession）
-2. 添加安全扫描（OWASP ZAP）到 CI/CD
-3. 实现密钥轮换机制
-4. 添加分布式缓存支持
-
-### 6.3 长期执行（3-6 个月）
-
-1. 支持更多客户端认证方法（private_key_jwt, mTLS）
-2. 实现 Pushed Authorization Requests (PAR) RFC 9126
-3. 支持 Rich Authorization Requests (RAR) RFC 9396
-4. 支持 JWT 结构化访问令牌 (RFC 9068)
+**注意**: `ConsumeDeviceCodeAsync` 在 MongoDB 实现中存在，需要确保接口完整性
 
 ---
 
-## 7. 测试建议
+## 五、问题汇总
 
-### 7.1 当前测试分析
+### 🔴 严重问题 (P0)
 
-**IdentityServerTests.cs**:
-- ✅ 覆盖主要流程（授权码、客户端凭证、设备流）
-- ✅ 测试了 PKCE 验证
-- ✅ 测试了刷新令牌轮换
-- ✅ 测试了发现和 JWKS 端点
+| # | 问题 | 规范 | 影响 |
+|---|------|------|------|
+| 1 | Access Token 缺少 `aud` 声明 | RFC 7.1.3.6 | 令牌可用于任何资源服务器 |
+| 2 | Introspection 返回格式错误 | RFC 7660 2.2 | 不符合 RFC 标准 |
+| 3 | 缺少点击劫持保护 | RFC 7.10 | 授权页面可被嵌入 |
 
-**不足之处**:
-- ❌ 缺少并发测试
-- ❌ 缺少边界条件测试（超长输入、特殊字符）
-- ❌ 缺少安全测试（重放攻击、令牌伪造）
-- ❌ 没有性能测试
+### 🟡 中等问题 (P1)
 
-### 7.2 推荐测试用例
+| # | 问题 | 规范 | 影响 |
+|---|------|------|------|
+| 4 | localhost redirect_uri 端口可变 | RFC 8252 7.3 | localhost 精确匹配可能失败 |
+| 5 | Discovery 文档缺少字段 | RFC 8414 | 互操作性下降 |
+| 6 | 公开客户端刷新令牌安全 | RFC 9700 4.14.2 | 安全风险 |
+| 7 | 设备流轮询间隔控制 | RFC 8628 3.5 | 可能被滥用 |
 
-```csharp
-// 需要添加的测试用例:
+### 🟢 轻微问题 (P2)
 
-[TestMethod]
-public async Task AuthorizationCode_ReuseAttempt_RevokesAllTokens()
-{
-    // 测试授权码重用时撤销所有令牌
-}
-
-[TestMethod]
-public async Task Token_ParallelRequests_HandlesRaceCondition()
-{
-    // 测试并发请求处理
-}
-
-[TestMethod]
-public async Task ClientAuthentication_TimingAttack_Protected()
-{
-    // 验证时序攻击防护
-}
-
-[TestMethod]
-public async Task Pkce_CodeInjectionAttempt_Blocked()
-{
-    // 测试 PKCE 注入攻击防护
-}
-```
+| # | 问题 | 建议 |
+|---|------|------|
+| 8 | device_code 验证 URI 返回 | RFC 8628 3.2 |
+| 9 | plain PKCE 支持 | 限制仅开发环境使用 |
+| 10 | JWKS 端点完善 | 添加更多密钥类型 |
 
 ---
 
-## 8. 性能建议
+## 六、代码质量评价
 
-### 8.1 当前潜在问题
+### ✅ 优点
+1. 分层清晰：Abstractions → Core → DataAccess → Host
+2. 依赖注入正确使用
+3. 异步编程规范
+4. 并发控制使用 RowVersion
+5. 常量时间比较防时序攻击
+6. 支持多种数据库后端
 
-1. **内存存储锁竞争**: `InMemoryPersistedGrantStore` 使用全局锁
-2. **JWT 验证无缓存**: 每次验证都从存储获取密钥
-3. **数据库查询**: 部分查询可能未优化
-
-### 8.2 优化建议
-
-```csharp
-// 1. 使用读写锁优化内存存储
-private readonly ReaderWriterLockSlim _lock = new();
-
-// 2. 缓存签名密钥
-private readonly IMemoryCache _keyCache;
-
-// 3. 添加响应缓存到发现端点
-[ResponseCache(Duration = 3600)]
-public async Task<IActionResult> GetConfiguration(...)
-```
+### ⚠️ 需改进
+1. 部分魔法数字应定义为常量
+2. 公开 API 缺少 XML 文档
+3. 缺少单元测试覆盖检查
 
 ---
 
-## 9. 文档建议
+## 七、修复优先级
 
-### 9.1 需要完善的文档
+### 立即修复 (P0)
+1. **TokenService.cs:95** - 添加 `aud` 声明
+2. **IntrospectionController.cs** - 返回 401 + WWW-Authenticate
+3. **AuthorizeController.cs** - 添加点击劫持保护头
 
-1. **API 文档**: 使用 Swagger/OpenAPI 自动生成
-2. **部署指南**: Docker、K8s 部署文档
-3. **安全配置指南**: TLS、密钥管理、审计
-4. **故障排除指南**: 常见问题解决方案
+### 高优先级 (P1)
+4. localhost redirect_uri 端口可变逻辑
+5. 完善 Discovery 文档字段
+6. 设备流轮询间隔控制
 
-### 9.2 代码注释改进
-
-```csharp
-/// <summary>
-/// 处理授权码交换令牌请求
-/// </summary>
-/// <remarks>
-/// 实现了 OAuth 2.1 Section 4.1.3 的要求:
-/// - 验证授权码未使用过
-/// - 验证 PKCE code_verifier
-/// - 验证 redirect_uri 匹配
-/// - 授权码只能使用一次
-/// </remarks>
-private async Task<IActionResult> HandleAuthorizationCode(...)
-```
+### 中优先级 (P2)
+7. 公开客户端刷新令牌安全增强
+8. 限制 plain PKCE 使用
 
 ---
 
-## 10. 总结与行动计划
+## 附录: 参考规范
 
-### 10.1 优先级矩阵
-
-| 优先级 | 问题 | 影响 | 工作量 |
-|--------|------|------|--------|
-| P0 | 密钥持久化 | 高 | 中 |
-| P0 | 审计日志 | 高 | 中 |
-| P1 | UserInfo 端点 | 中 | 低 |
-| P1 | 速率限制 | 中 | 中 |
-| P2 | POST 授权端点 | 低 | 低 |
-| P2 | 测试覆盖 | 中 | 高 |
-
-### 10.2 团队能力提升建议
-
-1. **OAuth 2.1 规范培训**: 组织团队学习 RFC 6749、RFC 7636、RFC 8628
-2. **安全编码培训**: 学习 OWASP Top 10、安全编码实践
-3. **代码审查流程**: 建立安全相关的代码审查清单
-4. **自动化测试**: 引入安全扫描工具到 CI/CD
-
-### 10.3 审查清单模板
-
-```markdown
-## OAuth 2.1 代码审查清单
-
-### 安全性
-- [ ] PKCE 是否正确实现？
-- [ ] 授权码是否一次性使用？
-- [ ] 客户端密钥是否安全比较？
-- [ ] 是否包含 Cache-Control: no-store？
-- [ ] 错误响应是否不泄露敏感信息？
-
-### 规范合规
-- [ ] 是否支持所有必需的 grant types？
-- [ ] 错误响应是否符合 RFC 6749 Section 5.2？
-- [ ] 发现端点是否完整？
-- [ ] 是否包含 iss 参数？
-
-### 代码质量
-- [ ] 是否有单元测试？
-- [ ] 是否有 XML 文档？
-- [ ] 是否处理了所有异常？
-- [ ] 是否使用了 CancellationToken？
-```
-
----
-
-## 附录 A: 参考规范
-
-1. [OAuth 2.1 Authorization Framework](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-v2-1-15)
+1. [OAuth 2.1](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-v2-1-15)
 2. [RFC 7636 - PKCE](https://tools.ietf.org/html/rfc7636)
-3. [RFC 8628 - Device Authorization Grant](https://tools.ietf.org/html/rfc8628)
+3. [RFC 8628 - Device Flow](https://tools.ietf.org/html/rfc8628)
 4. [RFC 7009 - Token Revocation](https://tools.ietf.org/html/rfc7009)
 5. [RFC 7662 - Token Introspection](https://tools.ietf.org/html/rfc7662)
-6. [RFC 8414 - Discovery](https://tools.ietf.org/html/rfc8414)
-7. [RFC 9700 - OAuth 2.0 Security Best Current Practice](https://tools.ietf.org/html/rfc9700)
-8. [OpenID Connect Core 1.0](https://openid.net/specs/openid-connect-core-1_0.html)
+6. [RFC 8252 - Native Apps](https://tools.ietf.org/html/rfc8252)
+7. [RFC 9700 - Security BCP](https://tools.ietf.org/html/rfc9700)
+8. [RFC 9207 - Issuer Identification](https://tools.ietf.org/html/rfc9207)
 
 ---
 
-**报告编制**: 资深开发工程师代码审查  
-**审查耗时**: 约 2 小时  
-**下次审查建议**: 3 个月后
+**报告编制**: AI Code Review
+**审查日期**: 2026-04-29

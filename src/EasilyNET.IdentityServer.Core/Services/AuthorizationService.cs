@@ -74,7 +74,8 @@ public class AuthorizationService : IAuthorizationService
 
         // 严格匹配 redirect_uri (OAuth 2.1 要求 RFC 3986 Section 6.2.1)
         // OAuth 2.1 明确要求精确字符串匹配，不允许重定向URI注册为前缀或模式匹配
-        if (!client.RedirectUris.Any(uri => string.Equals(uri, request.RedirectUri, StringComparison.Ordinal)))
+        // 但对于 localhost，应允许端口变化 (开发场景)
+        if (!ValidateRedirectUri(client.RedirectUris, request.RedirectUri))
         {
             return new()
             {
@@ -201,5 +202,57 @@ public class AuthorizationService : IAuthorizationService
     {
         _logger.LogInformation("Authorization request {RequestId} denied", requestId);
         await Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// 验证 redirect_uri，支持 localhost 端口可变逻辑
+    /// </summary>
+    /// <remarks>
+    /// OAuth 2.1 规范要求精确字符串匹配，但对于 http://localhost 的 redirect_uri，
+    /// 允许端口变化以支持开发场景。
+    /// </remarks>
+    private static bool ValidateRedirectUri(IEnumerable<string> registeredUris, string requestedUri)
+    {
+        // 首先尝试精确匹配
+        if (registeredUris.Any(uri => string.Equals(uri, requestedUri, StringComparison.Ordinal)))
+        {
+            return true;
+        }
+
+        // 对于 localhost，允许端口变化
+        if (IsLocalhostWithVariablePort(requestedUri))
+        {
+            var requestedUriWithoutPort = GetLocalhostBase(requestedUri);
+            return registeredUris.Any(uri => IsLocalhostWithVariablePort(uri) &&
+                                              string.Equals(GetLocalhostBase(uri), requestedUriWithoutPort, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// 检查 URI 是否为 localhost 且端口可变
+    /// </summary>
+    private static bool IsLocalhostWithVariablePort(string uri)
+    {
+        if (!Uri.TryCreate(uri, UriKind.Absolute, out var parsedUri))
+            return false;
+
+        // 检查是否为 http://localhost 或 https://localhost
+        return (parsedUri.Scheme == "http" || parsedUri.Scheme == "https") &&
+               (parsedUri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+                parsedUri.Host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
+                parsedUri.Host.Equals("::1", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// 获取 localhost URI 的基础部分（不含端口）
+    /// </summary>
+    private static string GetLocalhostBase(string uri)
+    {
+        if (!Uri.TryCreate(uri, UriKind.Absolute, out var parsedUri))
+            return uri;
+
+        return $"{parsedUri.Scheme}://{parsedUri.Host}";
     }
 }

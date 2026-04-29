@@ -82,11 +82,20 @@ var scopeNames = scopes.Select(s => s.Name)
             ["response_modes_supported"] = new[] { "query", "fragment", "form_post" },
             ["grant_types_supported"] = new[] { "authorization_code", "client_credentials", "refresh_token", "urn:ietf:params:oauth:grant-type:device_code" },
             ["token_endpoint_auth_methods_supported"] = tokenEndpointAuthMethods.ToArray(),
+            ["token_endpoint_auth_signing_alg_values_supported"] = new[] { "RS256", "RS384", "RS512" },
             ["subject_types_supported"] = new[] { "public" },
-            ["id_token_signing_alg_values_supported"] = new[] { "HS256", "RS256" },
+            ["id_token_signing_alg_values_supported"] = new[] { "RS256", "RS384", "RS512" },
             ["code_challenge_methods_supported"] = new[] { "S256" },
             ["claims_supported"] = allClaims,
-            ["error_uri"] = "https://docs.example.com/errors" // 可选的错误URI
+            // OAuth 2.1 / OIDC 额外字段
+            ["authorization_response_iss_parameter_supported"] = true,
+            ["backchannel_logout_supported"] = true,
+            ["backchannel_logout_session_supported"] = true,
+            ["frontchannel_logout_supported"] = true,
+            ["frontchannel_logout_session_supported"] = true,
+            ["end_session_endpoint"] = $"{issuer}/connect/logout",
+            ["service_documentation"] = "https://docs.example.com",
+            ["dpop_signing_alg_values_supported"] = new[] { "RS256", "RS384", "RS512" }
         };
         return Ok(discovery);
     }
