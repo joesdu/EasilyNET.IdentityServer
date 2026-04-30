@@ -60,6 +60,11 @@ public class AuthorizationScopeDescriptor
     public bool Required { get; init; }
 
     /// <summary>
+    /// consent 风险等级：low/medium/high
+    /// </summary>
+    public string RiskLevel { get; init; } = "low";
+
+    /// <summary>
     /// 是否已选中
     /// </summary>
     public bool Selected { get; init; }
@@ -88,6 +93,11 @@ public class AuthorizationScopeDescriptor
     /// 资源与作用域合并后的用户声明
     /// </summary>
     public string[] UserClaims { get; init; } = [];
+
+    /// <summary>
+    /// consent 阶段展示的风险提示
+    /// </summary>
+    public string[] ConsentWarnings { get; init; } = [];
 }
 
 /// <summary>

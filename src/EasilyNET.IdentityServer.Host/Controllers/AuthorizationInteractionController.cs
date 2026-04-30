@@ -15,6 +15,22 @@ public class AuthorizationInteractionController(
     IAuthorizationService authorizationService,
     IdentityServerOptions options) : ControllerBase
 {
+    [HttpGet("/connect/authorize/interaction/page/{requestId}")]
+    public IActionResult OpenInteractionPage(string requestId)
+    {
+        if (string.IsNullOrWhiteSpace(requestId))
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "requestId is required",
+                Detail = "An authorization interaction page request must include a requestId.",
+                Status = StatusCodes.Status400BadRequest
+            });
+        }
+
+        return Redirect(AuthorizationInteractionPageUrlBuilder.BuildUiUrl(Request, options, requestId));
+    }
+
     [HttpGet("/connect/authorize/context/{requestId}")]
     public async Task<IActionResult> GetContext(string requestId, CancellationToken cancellationToken)
     {
@@ -31,6 +47,7 @@ public class AuthorizationInteractionController(
 
         var availableAccounts = await GetAvailableAccountsAsync(context, cancellationToken);
         var scopeDetails = await GetScopeDetailsAsync(context, cancellationToken);
+        var interactionType = ResolveInteractionType(context, availableAccounts);
 
         return Ok(new AuthorizationRequestContextResponse
         {
@@ -52,6 +69,9 @@ public class AuthorizationInteractionController(
             SubjectId = context.SubjectId,
             SelectedAccount = availableAccounts.FirstOrDefault(account => account.IsCurrent),
             AvailableAccounts = availableAccounts,
+            InteractionType = interactionType,
+            AvailableActions = ResolveAvailableActions(interactionType),
+            InteractionPage = AuthorizationInteractionPageUrlBuilder.BuildEntryUrl(Request, options, context.RequestId),
             CreatedAt = context.CreationTime,
             ExpiresAt = context.ExpirationTime,
             ContinueEndpoint = "/connect/authorize/interaction",
@@ -204,6 +224,31 @@ public class AuthorizationInteractionController(
         string.Equals(action, "select_account", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(action, "consent", StringComparison.OrdinalIgnoreCase);
 
+    private static string ResolveInteractionType(AuthorizationRequestContext context, IReadOnlyCollection<AuthorizationAccountCandidate> availableAccounts)
+    {
+        if (!string.IsNullOrWhiteSpace(context.SubjectId))
+        {
+            return context.RequiresConsent ? "consent" : "login";
+        }
+
+        var prompts = (context.Prompt ?? string.Empty)
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        if (prompts.Contains("select_account", StringComparer.OrdinalIgnoreCase) || availableAccounts.Count > 1)
+        {
+            return "select_account";
+        }
+
+        return "login";
+    }
+
+    private static string[] ResolveAvailableActions(string interactionType) => interactionType switch
+    {
+        "login" => ["login", "deny"],
+        "select_account" => ["select_account", "deny"],
+        _ => ["consent", "deny"]
+    };
+
     private async Task<AuthorizationInteractionResult> BuildInteractionRequiredResponseAsync(
         AuthorizationRequestContext context,
         string interactionType,
@@ -238,6 +283,7 @@ public class AuthorizationInteractionController(
                 PendingConsentScopes = context.PendingConsentScopes.Length == 0 ? context.RequestedScopes : context.PendingConsentScopes,
                 ContinueEndpoint = "/connect/authorize/interaction",
                 ContextEndpoint = $"/connect/authorize/context/{context.RequestId}",
+                InteractionPage = AuthorizationInteractionPageUrlBuilder.BuildEntryUrl(Request, options, context.RequestId),
                 AvailableActions = interactionType switch
                 {
                     "login" => ["login", "deny"],
@@ -353,6 +399,8 @@ public class AuthorizationInteractionCommand
 
 public class AuthorizationRequestContextResponse
 {
+    public string[] AvailableActions { get; set; } = [];
+
     public AuthorizationAccountCandidate[] AvailableAccounts { get; set; } = [];
 
     public string? CancelEndpoint { get; set; }
@@ -373,9 +421,13 @@ public class AuthorizationRequestContextResponse
 
     public string? LoginHint { get; set; }
 
+    public string? InteractionPage { get; set; }
+
     public string? LogoUri { get; set; }
 
     public int? MaxAge { get; set; }
+
+    public required string InteractionType { get; set; }
 
     public string[] PendingConsentScopes { get; set; } = [];
 
@@ -426,6 +478,8 @@ public class AuthorizationInteractionResponsePayload
     public required string ErrorDescription { get; set; }
 
     public required string InteractionType { get; set; }
+
+    public string? InteractionPage { get; set; }
 
     public string? LoginHint { get; set; }
 

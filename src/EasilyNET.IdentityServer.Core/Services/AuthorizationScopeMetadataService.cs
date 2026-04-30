@@ -68,6 +68,8 @@ public class AuthorizationScopeMetadataService(IResourceStore resourceStore) : I
                         }
                     ],
                     UserClaims = identity.UserClaims.Distinct(StringComparer.Ordinal).ToArray(),
+                    ConsentWarnings = BuildConsentWarnings(identity.Required, identity.UserClaims, identity.Properties),
+                    RiskLevel = DetermineRiskLevel("identity", identity.UserClaims, identity.Properties),
                     Selected = selected.Contains(identity.Name),
                     Type = "identity"
                 });
@@ -110,6 +112,8 @@ public class AuthorizationScopeMetadataService(IResourceStore resourceStore) : I
                     Properties = mergedProperties,
                     Resources = resources,
                     UserClaims = mergedClaims,
+                    ConsentWarnings = BuildConsentWarnings(api.Required, mergedClaims, mergedProperties),
+                    RiskLevel = DetermineRiskLevel("api", mergedClaims, mergedProperties),
                     Selected = selected.Contains(api.Name),
                     Type = "api"
                 });
@@ -130,6 +134,8 @@ public class AuthorizationScopeMetadataService(IResourceStore resourceStore) : I
                 Properties = new Dictionary<string, string>(),
                 Resources = [],
                 UserClaims = [],
+                ConsentWarnings = [],
+                RiskLevel = "low",
                 Selected = selected.Contains(scope),
                 Type = "unknown"
             });
@@ -156,4 +162,59 @@ public class AuthorizationScopeMetadataService(IResourceStore resourceStore) : I
 
         return string.Join(" ", parts);
     }
+
+    private static string[] BuildConsentWarnings(bool required, IEnumerable<string> claims, IDictionary<string, string> properties)
+    {
+        var warnings = new List<string>();
+        var normalizedClaims = claims.Distinct(StringComparer.Ordinal).ToArray();
+
+        if (required)
+        {
+            warnings.Add("This permission is required and cannot be deselected.");
+        }
+
+        if (normalizedClaims.Any(static claim => string.Equals(claim, "role", StringComparison.OrdinalIgnoreCase)))
+        {
+            warnings.Add("This permission may expose role or authorization membership data.");
+        }
+
+        if (normalizedClaims.Any(IsPersonalClaim))
+        {
+            warnings.Add("This permission may expose personal profile information.");
+        }
+
+        if (properties.TryGetValue("audience", out var audience) && !string.IsNullOrWhiteSpace(audience))
+        {
+            warnings.Add($"Access tokens issued for this permission target resource audience '{audience}'.");
+        }
+
+        return warnings.Distinct(StringComparer.Ordinal).ToArray();
+    }
+
+    private static string DetermineRiskLevel(string scopeType, IEnumerable<string> claims, IDictionary<string, string> properties)
+    {
+        var normalizedClaims = claims.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (normalizedClaims.Any(static claim => string.Equals(claim, "role", StringComparison.OrdinalIgnoreCase)) ||
+            normalizedClaims.Any(IsPersonalClaim) ||
+            properties.ContainsKey("audience"))
+        {
+            return "high";
+        }
+
+        if (string.Equals(scopeType, "identity", StringComparison.OrdinalIgnoreCase) || normalizedClaims.Length > 0)
+        {
+            return "medium";
+        }
+
+        return "low";
+    }
+
+    private static bool IsPersonalClaim(string claim) =>
+        string.Equals(claim, "email", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(claim, "phone_number", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(claim, "address", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(claim, "birthdate", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(claim, "profile", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(claim, "name", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(claim, "picture", StringComparison.OrdinalIgnoreCase);
 }

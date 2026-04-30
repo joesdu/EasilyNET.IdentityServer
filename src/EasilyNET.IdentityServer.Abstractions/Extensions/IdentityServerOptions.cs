@@ -93,6 +93,16 @@ public class IdentityServerOptions
     public string Issuer { get; set; } = "https://identityserver.example.com";
 
     /// <summary>
+    /// 对外暴露的授权交互入口路径（同域稳定入口）
+    /// </summary>
+    public string InteractionPageEntryPath { get; set; } = "/connect/authorize/interaction/page";
+
+    /// <summary>
+    /// 最终前端授权交互页面地址，可为绝对 URL 或相对路径
+    /// </summary>
+    public string InteractionPagePath { get; set; } = "/authorize/interaction";
+
+    /// <summary>
     /// 允许的访问令牌签名算法
     /// </summary>
     public ICollection<string> AllowedAccessTokenSigningAlgorithms { get; set; } = new[] { "RS256", "RS384", "RS512" };

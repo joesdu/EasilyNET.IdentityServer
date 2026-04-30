@@ -16,8 +16,19 @@ export default defineConfig({
       changeOrigin: true,
       secure: false,
     },
+    '/connect': {
+      target: 'https://localhost:5002',
+      changeOrigin: true,
+      secure: false,
+    },
   },
   routes: [
+    {
+      path: '/authorize/interaction',
+      component: './AuthorizeInteraction',
+      layout: false,
+      menuRender: false,
+    },
     {
       path: '/',
       redirect: '/clients',

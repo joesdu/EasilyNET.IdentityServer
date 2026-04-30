@@ -130,6 +130,111 @@ export interface CreateIdentityResourceRequest {
   userClaims: string[];
 }
 
+export interface AuthorizationAccountCandidate {
+  subjectId: string;
+  displayName?: string;
+  identityProvider?: string;
+  isCurrent: boolean;
+  loginHint?: string;
+}
+
+export interface AuthorizationScopeResourceDescriptor {
+  name: string;
+  displayName?: string;
+  description?: string;
+  properties: Record<string, string>;
+  userClaims: string[];
+  displayGroup?: string;
+}
+
+export interface AuthorizationScopeDescriptor {
+  consentDescription?: string;
+  description?: string;
+  displayName?: string;
+  displayGroup?: string;
+  emphasize: boolean;
+  name: string;
+  properties: Record<string, string>;
+  required: boolean;
+  riskLevel: 'low' | 'medium' | 'high';
+  selected: boolean;
+  type: string;
+  isSelectable: boolean;
+  selectionLockedReason?: string;
+  resources: AuthorizationScopeResourceDescriptor[];
+  userClaims: string[];
+  consentWarnings: string[];
+}
+
+export interface AuthorizationRequestContextResponse {
+  availableActions: string[];
+  availableAccounts: AuthorizationAccountCandidate[];
+  cancelEndpoint?: string;
+  clientId: string;
+  clientName?: string;
+  clientUri?: string;
+  contextEndpoint?: string;
+  continueEndpoint?: string;
+  createdAt: string;
+  expiresAt: string;
+  interactionType: 'login' | 'select_account' | 'consent';
+  interactionPage?: string;
+  loginHint?: string;
+  logoUri?: string;
+  maxAge?: number;
+  pendingConsentScopes: string[];
+  prompt?: string;
+  rememberConsentAllowed: boolean;
+  redirectUri: string;
+  requestId: string;
+  requestedScopes: string[];
+  requestedScopeDetails: AuthorizationScopeDescriptor[];
+  requiresConsent: boolean;
+  selectedAccount?: AuthorizationAccountCandidate;
+  state?: string;
+  subjectId?: string;
+}
+
+export interface AuthorizationInteractionCommand {
+  action: 'login' | 'select_account' | 'consent' | 'deny';
+  consentGranted?: boolean;
+  rememberConsent?: boolean;
+  requestId: string;
+  scopes?: string[];
+  subjectId?: string;
+}
+
+export interface AuthorizationInteractionPayload {
+  availableActions: string[];
+  availableAccounts: AuthorizationAccountCandidate[];
+  clientId: string;
+  clientName?: string;
+  contextEndpoint?: string;
+  continueEndpoint?: string;
+  error: string;
+  errorDescription: string;
+  interactionType: 'login' | 'select_account' | 'consent';
+  interactionPage?: string;
+  loginHint?: string;
+  maxAge?: number;
+  pendingConsentScopes: string[];
+  prompt?: string;
+  rememberConsentAllowed: boolean;
+  redirectUri: string;
+  requestId: string;
+  requestedScopes: string[];
+  requestedScopeDetails: AuthorizationScopeDescriptor[];
+  selectedAccount?: AuthorizationAccountCandidate;
+  state?: string;
+  subjectId?: string;
+}
+
+export interface AuthorizationInteractionResult {
+  interaction?: AuthorizationInteractionPayload;
+  outcome: 'redirect' | 'interaction_required';
+  redirectUrl?: string;
+}
+
 // ================== Clients API ==================
 
 export async function getClients(): Promise<Client[]> {
@@ -216,4 +321,14 @@ export async function updateIdentityResource(id: number, data: CreateIdentityRes
 
 export async function deleteIdentityResource(id: number): Promise<void> {
   return request(`/api/identityresources/${id}`, { method: 'DELETE' });
+}
+
+// ================== Authorization Interaction API ==================
+
+export async function getAuthorizationInteractionContext(requestId: string): Promise<AuthorizationRequestContextResponse> {
+  return request<AuthorizationRequestContextResponse>(`/connect/authorize/context/${encodeURIComponent(requestId)}`);
+}
+
+export async function submitAuthorizationInteraction(data: AuthorizationInteractionCommand): Promise<AuthorizationInteractionResult> {
+  return request<AuthorizationInteractionResult>('/connect/authorize/interaction', { method: 'POST', data });
 }

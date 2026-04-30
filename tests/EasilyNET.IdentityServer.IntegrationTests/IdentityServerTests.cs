@@ -378,6 +378,7 @@ public class IdentityServerTests
         Assert.AreEqual("login", json.RootElement.GetProperty("interactionType").GetString());
         Assert.AreEqual("/connect/authorize/interaction", json.RootElement.GetProperty("continueEndpoint").GetString());
         Assert.IsTrue(json.RootElement.GetProperty("contextEndpoint").GetString()!.Contains("/connect/authorize/context/", StringComparison.Ordinal));
+        Assert.IsTrue(json.RootElement.GetProperty("interactionPage").GetString()!.Contains("/connect/authorize/interaction/page/", StringComparison.Ordinal));
         CollectionAssert.Contains(json.RootElement.GetProperty("availableActions").EnumerateArray().Select(x => x.GetString()).ToList(), "login");
     }
 
@@ -407,7 +408,34 @@ public class IdentityServerTests
         Assert.AreEqual("spa", contextJson.RootElement.GetProperty("clientId").GetString());
         Assert.AreEqual("http://localhost:3000/callback", contextJson.RootElement.GetProperty("redirectUri").GetString());
         Assert.AreEqual("alice@example.com", contextJson.RootElement.GetProperty("loginHint").GetString());
+        Assert.AreEqual("login", contextJson.RootElement.GetProperty("interactionType").GetString());
+        Assert.IsTrue(contextJson.RootElement.GetProperty("interactionPage").GetString()!.Contains($"/connect/authorize/interaction/page/{requestId}", StringComparison.Ordinal));
+        CollectionAssert.AreEquivalent(new[] { "login", "deny" }, contextJson.RootElement.GetProperty("availableActions").EnumerateArray().Select(x => x.GetString()!).ToArray());
         CollectionAssert.AreEquivalent(new[] { "openid", "profile", "api1" }, contextJson.RootElement.GetProperty("requestedScopes").EnumerateArray().Select(x => x.GetString()!).ToArray());
+    }
+
+    /// <summary>
+    /// Test same-origin interaction page entry redirects to the configured UI route
+    /// </summary>
+    [TestMethod]
+    public async Task AuthorizationInteraction_PageEntry_RedirectsToInteractionUi()
+    {
+        var verifier = CreateCodeVerifier();
+        var challenge = CreateCodeChallenge(verifier);
+        var response = await _client.GetAsync($"/connect/authorize?response_type=code&client_id=spa&redirect_uri={Uri.EscapeDataString("http://localhost:3000/callback")}&scope=openid%20profile%20api1&state=page-entry&code_challenge={challenge}&code_challenge_method=S256");
+
+        Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
+        var interactionJson = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+        var interactionPage = interactionJson.RootElement.GetProperty("interactionPage").GetString();
+
+        Assert.IsFalse(string.IsNullOrWhiteSpace(interactionPage));
+
+        using var redirectRequest = new HttpRequestMessage(HttpMethod.Get, interactionPage);
+        using var redirectResponse = await _client.SendAsync(redirectRequest);
+
+        Assert.AreEqual(HttpStatusCode.Redirect, redirectResponse.StatusCode);
+        Assert.IsNotNull(redirectResponse.Headers.Location);
+        Assert.IsTrue(redirectResponse.Headers.Location!.ToString().Contains("/authorize/interaction?requestId=", StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -560,6 +588,9 @@ public class IdentityServerTests
         Assert.AreEqual(1, availableAccounts.Length);
         Assert.AreEqual("alice", availableAccounts[0].GetProperty("subjectId").GetString());
         Assert.AreEqual("alice@example.com", availableAccounts[0].GetProperty("loginHint").GetString());
+        Assert.AreEqual("select_account", contextJson.RootElement.GetProperty("interactionType").GetString());
+        Assert.IsTrue(contextJson.RootElement.GetProperty("interactionPage").GetString()!.Contains("/connect/authorize/interaction/page/", StringComparison.Ordinal));
+        CollectionAssert.AreEquivalent(new[] { "select_account", "deny" }, contextJson.RootElement.GetProperty("availableActions").EnumerateArray().Select(x => x.GetString()!).ToArray());
         Assert.IsFalse(contextJson.RootElement.TryGetProperty("selectedAccount", out var selectedAccount) && selectedAccount.ValueKind == JsonValueKind.Object);
     }
 
@@ -596,7 +627,12 @@ public class IdentityServerTests
         Assert.IsTrue(requestedScopeDetails.Any(scope => scope.GetProperty("name").GetString() == "openid" && scope.GetProperty("required").GetBoolean() && scope.GetProperty("type").GetString() == "identity"));
         Assert.IsTrue(requestedScopeDetails.Any(scope => scope.GetProperty("name").GetString() == "openid" && !scope.GetProperty("isSelectable").GetBoolean()));
         Assert.IsTrue(requestedScopeDetails.Any(scope => scope.GetProperty("name").GetString() == "openid" && scope.GetProperty("selectionLockedReason").GetString()!.Contains("cannot be deselected", StringComparison.Ordinal)));
+        Assert.IsTrue(requestedScopeDetails.Any(scope => scope.GetProperty("name").GetString() == "openid" && scope.GetProperty("riskLevel").GetString() == "medium"));
+        Assert.IsTrue(requestedScopeDetails.Any(scope => scope.GetProperty("name").GetString() == "openid" && scope.GetProperty("consentWarnings").EnumerateArray().Any(w => w.GetString()!.Contains("required", StringComparison.OrdinalIgnoreCase))));
         Assert.IsTrue(requestedScopeDetails.Any(scope => scope.GetProperty("name").GetString() == "api1" && scope.GetProperty("consentDescription").GetString()!.Contains("Audience: api1", StringComparison.Ordinal)));
+        Assert.IsTrue(requestedScopeDetails.Any(scope => scope.GetProperty("name").GetString() == "api1" && scope.GetProperty("riskLevel").GetString() == "high"));
+        Assert.IsTrue(requestedScopeDetails.Any(scope => scope.GetProperty("name").GetString() == "api1" && scope.GetProperty("consentWarnings").EnumerateArray().Any(w => w.GetString()!.Contains("audience 'api1'", StringComparison.Ordinal))));
+        Assert.IsTrue(requestedScopeDetails.Any(scope => scope.GetProperty("name").GetString() == "api1" && scope.GetProperty("consentWarnings").EnumerateArray().Any(w => w.GetString()!.Contains("role", StringComparison.OrdinalIgnoreCase))));
         Assert.IsTrue(requestedScopeDetails.Any(scope => scope.GetProperty("name").GetString() == "profile" && scope.GetProperty("emphasize").GetBoolean()));
         Assert.IsTrue(requestedScopeDetails.Any(scope => scope.GetProperty("name").GetString() == "api1" && scope.GetProperty("displayName").GetString() == "API 1 Access" && scope.GetProperty("type").GetString() == "api"));
         Assert.IsTrue(requestedScopeDetails.Any(scope => scope.GetProperty("name").GetString() == "openid" && scope.GetProperty("displayGroup").GetString() == "Identity resources"));
@@ -610,6 +646,9 @@ public class IdentityServerTests
         var contextJson = await JsonDocument.ParseAsync(await contextResponse.Content.ReadAsStreamAsync());
         Assert.AreEqual("alice", contextJson.RootElement.GetProperty("subjectId").GetString());
         Assert.AreEqual("alice", contextJson.RootElement.GetProperty("selectedAccount").GetProperty("subjectId").GetString());
+        Assert.AreEqual("consent", contextJson.RootElement.GetProperty("interactionType").GetString());
+        Assert.IsTrue(contextJson.RootElement.GetProperty("interactionPage").GetString()!.Contains($"/connect/authorize/interaction/page/{requestId}", StringComparison.Ordinal));
+        CollectionAssert.AreEquivalent(new[] { "consent", "deny" }, contextJson.RootElement.GetProperty("availableActions").EnumerateArray().Select(x => x.GetString()!).ToArray());
         CollectionAssert.AreEquivalent(new[] { "openid", "profile", "api1" }, contextJson.RootElement.GetProperty("pendingConsentScopes").EnumerateArray().Select(x => x.GetString()!).ToArray());
         Assert.AreEqual(3, contextJson.RootElement.GetProperty("requestedScopeDetails").GetArrayLength());
 

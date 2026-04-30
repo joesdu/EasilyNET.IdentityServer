@@ -362,6 +362,7 @@ public class AuthorizeController : ControllerBase
             MaxAge = maxAge,
             ContextEndpoint = $"/connect/authorize/context/{requestId}",
             ContinueEndpoint = "/connect/authorize/interaction",
+            InteractionPage = AuthorizationInteractionPageUrlBuilder.BuildEntryUrl(Request, _options, requestId),
             AvailableActions = interactionType switch
             {
                 "login" => ["login", "deny"],
@@ -389,6 +390,8 @@ internal sealed class AuthorizationInteractionResponse
     public required string ErrorDescription { get; init; }
 
     public required string InteractionType { get; init; }
+
+    public string? InteractionPage { get; init; }
 
     public string? LoginHint { get; init; }
 
