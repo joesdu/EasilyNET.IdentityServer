@@ -1,4 +1,5 @@
 using EasilyNET.IdentityServer.Abstractions.Services;
+using EasilyNET.IdentityServer.Host.Infrastructure;
 using Microsoft.AspNetCore.Mvc;
 
 namespace EasilyNET.IdentityServer.Host.Controllers;
@@ -31,17 +32,28 @@ public class UserInfoController : ControllerBase
     public async Task<IActionResult> GetUserInfo(CancellationToken cancellationToken)
     {
         // 从 Authorization header 提取 access token
-        var accessToken = ExtractAccessToken();
+        var (scheme, accessToken) = OAuthRequestHelpers.ExtractAccessToken(Request);
+        accessToken ??= Request.HasFormContentType ? Request.Form["access_token"].FirstOrDefault() : null;
+        scheme ??= accessToken == null ? null : "Bearer";
         if (string.IsNullOrEmpty(accessToken))
         {
             return Unauthorized(new { error = "invalid_token", error_description = "Access token is required" });
         }
 
         // 验证 access token
-        var validationResult = await _tokenService.ValidateAccessTokenAsync(accessToken, cancellationToken);
+        var validationResult = await _tokenService.ValidateAccessTokenAsync(accessToken, new AccessTokenValidationContext
+        {
+            DPoPProof = Request.Headers["DPoP"].FirstOrDefault(),
+            HttpMethod = Request.Method,
+            Htu = OAuthRequestHelpers.BuildAbsoluteEndpointUri(Request)
+        }, cancellationToken);
         if (!validationResult.IsValid)
         {
             return Unauthorized(new { error = "invalid_token", error_description = validationResult.ErrorDescription });
+        }
+        if (string.Equals(validationResult.TokenType, "DPoP", StringComparison.Ordinal) && !string.Equals(scheme, "DPoP", StringComparison.Ordinal))
+        {
+            return Unauthorized(new { error = "invalid_token", error_description = "A DPoP-bound token must be sent using the DPoP authorization scheme." });
         }
 
         // 确保 token 包含 openid scope
@@ -93,28 +105,6 @@ public class UserInfoController : ControllerBase
 
         // 返回 UserInfo 响应（默认 JSON）
         return Ok(claims);
-    }
-
-    /// <summary>
-    /// 从请求中提取 Access Token
-    /// </summary>
-    private string? ExtractAccessToken()
-    {
-        // 1. 优先从 Authorization header 提取 Bearer token
-        var authHeader = Request.Headers.Authorization.ToString();
-        if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
-        {
-            return authHeader["Bearer ".Length..].Trim();
-        }
-
-        // 2. 尝试从表单 body 提取（POST 请求）
-        if (Request.HasFormContentType)
-        {
-            return Request.Form["access_token"].FirstOrDefault();
-        }
-
-        // 3. RFC 6750 / OAuth 2.1: 不接受 URI query 中的 access_token
-        return null;
     }
 
     private string? GetClientIpAddress()

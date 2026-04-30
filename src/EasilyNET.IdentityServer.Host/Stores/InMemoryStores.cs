@@ -12,6 +12,7 @@ namespace EasilyNET.IdentityServer.Host.Stores;
 public class InMemoryClientStore : IClientStore
 {
     private readonly List<Client> _clients = [];
+    private readonly Lock _lock = new();
 
     public InMemoryClientStore()
     {
@@ -112,13 +113,35 @@ public class InMemoryClientStore : IClientStore
 
     public Task<Client?> FindClientByIdAsync(string clientId, CancellationToken cancellationToken = default)
     {
-        var client = _clients.FirstOrDefault(c => c.ClientId == clientId);
+        Client? client;
+        lock (_lock)
+        {
+            client = _clients.FirstOrDefault(c => c.ClientId == clientId);
+        }
         return Task.FromResult(client);
     }
 
     public Task<IEnumerable<Client>> FindEnabledClientsAsync(CancellationToken cancellationToken = default)
     {
-        return Task.FromResult(_clients.Where(c => c.Enabled).AsEnumerable());
+        IEnumerable<Client> clients;
+        lock (_lock)
+        {
+            clients = _clients.Where(c => c.Enabled).ToArray();
+        }
+        return Task.FromResult(clients);
+    }
+
+    public Task CreateClientAsync(Client client, CancellationToken cancellationToken = default)
+    {
+        lock (_lock)
+        {
+            if (_clients.Any(existing => string.Equals(existing.ClientId, client.ClientId, StringComparison.Ordinal)))
+            {
+                throw new InvalidOperationException($"Client '{client.ClientId}' already exists.");
+            }
+            _clients.Add(client);
+        }
+        return Task.CompletedTask;
     }
 }
 

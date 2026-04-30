@@ -3,6 +3,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Collections.Concurrent;
+using System.Text.Json;
 using EasilyNET.IdentityServer.Abstractions.Extensions;
 using EasilyNET.IdentityServer.Abstractions.Models;
 using EasilyNET.IdentityServer.Abstractions.Services;
@@ -20,6 +21,7 @@ namespace EasilyNET.IdentityServer.Core.Services;
 /// </summary>
 public class TokenService : ITokenService, IDisposable
 {
+    private readonly IDPoPService? _dpopService;
     private readonly ILogger<TokenService> _logger;
     private readonly IdentityServerOptions _options;
     private readonly ConcurrentDictionary<string, DateTime> _revokedTokens = new(StringComparer.Ordinal);
@@ -38,6 +40,7 @@ public class TokenService : ITokenService, IDisposable
         ILogger<TokenService> logger,
         ISerializationService serialization,
         ISigningService signingService,
+        IDPoPService? dpopService = null,
         IPersistedGrantStore? grantStore = null,
         IResourceStore? resourceStore = null)
     {
@@ -45,6 +48,7 @@ public class TokenService : ITokenService, IDisposable
         _logger = logger;
         _serialization = serialization;
         _signingService = signingService;
+        _dpopService = dpopService;
         _grantStore = grantStore;
         _resourceStore = resourceStore;
 
@@ -101,6 +105,10 @@ public class TokenService : ITokenService, IDisposable
         {
             claims.Add(new(JwtRegisteredClaimNames.Aud, audience));
         }
+        if (!string.IsNullOrWhiteSpace(request.DPoPConfirmationJkt))
+        {
+            claims.Add(new("cnf", $"{{\"jkt\":\"{request.DPoPConfirmationJkt}\"}}", JsonClaimValueTypes.Json));
+        }
         var tokenDescriptor = new SecurityTokenDescriptor
         {
             Subject = new(claims),
@@ -134,7 +142,7 @@ public class TokenService : ITokenService, IDisposable
         return new()
         {
             AccessToken = accessToken,
-            TokenType = "Bearer",
+            TokenType = string.IsNullOrWhiteSpace(request.DPoPConfirmationJkt) ? "Bearer" : "DPoP",
             ExpiresIn = _options.AccessTokenLifetime,
             Scope = string.Join(" ", scopes),
             RefreshToken = refreshToken,
@@ -207,7 +215,7 @@ public class TokenService : ITokenService, IDisposable
     }
 
     /// <inheritdoc />
-    public async Task<TokenValidationResult> ValidateAccessTokenAsync(string token, CancellationToken cancellationToken = default)
+    public async Task<TokenValidationResult> ValidateAccessTokenAsync(string token, AccessTokenValidationContext? context = null, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -268,6 +276,40 @@ public class TokenService : ITokenService, IDisposable
             principal = tokenHandler.ValidateToken(token, validationParameters, out validatedToken);
             var clientId = principal.FindFirst("client_id")?.Value;
             var subjectId = principal.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+            var confirmationJkt = ExtractConfirmationJkt(principal);
+            if (!string.IsNullOrWhiteSpace(confirmationJkt))
+            {
+                if (_dpopService == null || context == null || string.IsNullOrWhiteSpace(context.DPoPProof) || string.IsNullOrWhiteSpace(context.HttpMethod) || string.IsNullOrWhiteSpace(context.Htu))
+                {
+                    return new()
+                    {
+                        IsValid = false,
+                        Error = "invalid_token",
+                        ErrorDescription = "A DPoP proof is required for this access token."
+                    };
+                }
+
+                var dpopValidation = await _dpopService.ValidateResourceRequestAsync(
+                    context.DPoPProof,
+                    token,
+                    confirmationJkt,
+                    new DPoPProofValidationContext
+                    {
+                        HttpMethod = context.HttpMethod,
+                        Htu = context.Htu
+                    },
+                    cancellationToken);
+
+                if (!dpopValidation.IsSuccess)
+                {
+                    return new()
+                    {
+                        IsValid = false,
+                        Error = dpopValidation.Error ?? "invalid_token",
+                        ErrorDescription = dpopValidation.ErrorDescription ?? "DPoP validation failed"
+                    };
+                }
+            }
             DateTime? expirationTime = validatedToken?.ValidTo == DateTime.MinValue
                                            ? null
                                            : validatedToken?.ValidTo;
@@ -275,9 +317,11 @@ public class TokenService : ITokenService, IDisposable
             {
                 IsValid = true,
                 ClientId = clientId,
+                ConfirmationJkt = confirmationJkt,
                 SubjectId = subjectId,
                 Scopes = scopes,
-                ExpirationTime = expirationTime
+                ExpirationTime = expirationTime,
+                TokenType = string.IsNullOrWhiteSpace(confirmationJkt) ? "Bearer" : "DPoP"
             };
         }
         catch (Exception ex)
@@ -349,6 +393,20 @@ public class TokenService : ITokenService, IDisposable
     private static bool ShouldIssueRefreshToken(TokenRequest request) =>
         request.Client.AllowedGrantTypes.Contains(GrantType.RefreshToken) &&
         request.GrantType is GrantType.AuthorizationCode or GrantType.RefreshToken or GrantType.DeviceCode;
+
+    private static string? ExtractConfirmationJkt(ClaimsPrincipal principal)
+    {
+        var confirmationClaim = principal.FindFirst("cnf")?.Value;
+        if (string.IsNullOrWhiteSpace(confirmationClaim))
+        {
+            return null;
+        }
+
+        using var document = JsonDocument.Parse(confirmationClaim);
+        return document.RootElement.TryGetProperty("jkt", out var jktElement)
+            ? jktElement.GetString()
+            : null;
+    }
 
     /// <summary>
     /// 清理过期的撤销令牌记录，防止内存泄漏

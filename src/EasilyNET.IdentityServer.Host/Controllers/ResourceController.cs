@@ -1,4 +1,5 @@
 using EasilyNET.IdentityServer.Abstractions.Services;
+using EasilyNET.IdentityServer.Host.Infrastructure;
 using Microsoft.AspNetCore.Mvc;
 
 namespace EasilyNET.IdentityServer.Host.Controllers;
@@ -23,10 +24,11 @@ public class ResourceController : ControllerBase
     [HttpPost("/connect/verify")]
     public async Task<IActionResult> VerifyToken(CancellationToken cancellationToken)
     {
-        var authHeader = Request.Headers.Authorization.ToString();
-        var headerToken = !string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
-            ? authHeader["Bearer ".Length..].Trim()
-            : null;
+        var (scheme, headerToken) = OAuthRequestHelpers.ExtractAccessToken(Request);
+        if (string.Equals(scheme, "Bearer", StringComparison.Ordinal) && Request.HasFormContentType)
+        {
+            headerToken = !string.IsNullOrWhiteSpace(headerToken) ? headerToken : null;
+        }
 
         string? formToken = null;
         if (Request.HasFormContentType)
@@ -52,7 +54,7 @@ public class ResourceController : ControllerBase
         // RFC 6750 Section 2.1: Bearer Token in Authorization Header
         if (!string.IsNullOrWhiteSpace(headerToken))
         {
-            return await ValidateTokenAsync(headerToken, "Bearer", cancellationToken);
+            return await ValidateTokenAsync(headerToken, scheme ?? "Bearer", cancellationToken);
         }
 
         // RFC 6750 Section 2.2: Form-Encoded Body (不推荐)
@@ -70,7 +72,12 @@ public class ResourceController : ControllerBase
     /// </summary>
     private async Task<IActionResult> ValidateTokenAsync(string token, string scheme, CancellationToken cancellationToken)
     {
-        var result = await _tokenService.ValidateAccessTokenAsync(token, cancellationToken);
+        var result = await _tokenService.ValidateAccessTokenAsync(token, new AccessTokenValidationContext
+        {
+            DPoPProof = Request.Headers["DPoP"].FirstOrDefault(),
+            HttpMethod = Request.Method,
+            Htu = OAuthRequestHelpers.BuildAbsoluteEndpointUri(Request)
+        }, cancellationToken);
 
         if (!result.IsValid)
         {
@@ -78,6 +85,10 @@ public class ResourceController : ControllerBase
                 result.Error ?? "invalid_token",
                 result.ErrorDescription ?? "Token validation failed",
                 scheme);
+        }
+        if (string.Equals(result.TokenType, "DPoP", StringComparison.Ordinal) && !string.Equals(scheme, "DPoP", StringComparison.Ordinal))
+        {
+            return UnauthorizedWithWwwAuthenticate("invalid_token", "A DPoP-bound token must use the DPoP authorization scheme", "DPoP");
         }
 
         return Ok(new
@@ -89,7 +100,7 @@ public class ResourceController : ControllerBase
             exp = result.ExpirationTime.HasValue
                       ? new DateTimeOffset(result.ExpirationTime.Value).ToUnixTimeSeconds()
                       : (long?)null,
-            token_type = "Bearer"
+            token_type = result.TokenType
         });
     }
 

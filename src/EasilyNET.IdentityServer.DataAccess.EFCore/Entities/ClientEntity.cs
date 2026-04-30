@@ -23,6 +23,8 @@ public class ClientEntity
 
     public List<ClientClaimEntity> Claims { get; set; } = [];
 
+    public string? Contacts { get; set; }
+
     public required string ClientId { get; set; }
 
     public string? ClientName { get; set; }
@@ -32,6 +34,10 @@ public class ClientEntity
     public int ClientType { get; set; }
 
     public string? ClientUri { get; set; }
+
+    public string? Jwks { get; set; }
+
+    public string? JwksUri { get; set; }
 
     public DateTime Created { get; set; } = DateTime.UtcNow;
 
@@ -47,7 +53,11 @@ public class ClientEntity
 
     public string? LogoUri { get; set; }
 
+    public string? PolicyUri { get; set; }
+
     public List<ClientPropertyEntity> Properties { get; set; } = [];
+
+    public bool RequireDpopProof { get; set; }
 
     public List<ClientRedirectUriEntity> RedirectUris { get; set; } = [];
 
@@ -55,9 +65,17 @@ public class ClientEntity
 
     public bool RequireClientSecret { get; set; } = true;
 
+    public string TokenEndpointAuthMethod { get; set; } = "client_secret_basic";
+
     public bool RequireConsent { get; set; } = true;
 
     public bool RequirePkce { get; set; } = true;
+
+    public string? TlsClientAuthSubjectDn { get; set; }
+
+    public string? TlsClientAuthThumbprint { get; set; }
+
+    public string? TosUri { get; set; }
 
     public DateTime? Updated { get; set; }
 

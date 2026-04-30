@@ -25,7 +25,7 @@ public interface ITokenService
     /// <summary>
     /// 验证 Access Token
     /// </summary>
-    Task<TokenValidationResult> ValidateAccessTokenAsync(string token, CancellationToken cancellationToken = default);
+    Task<TokenValidationResult> ValidateAccessTokenAsync(string token, AccessTokenValidationContext? context = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 撤销 Token
@@ -57,6 +57,11 @@ public class TokenRequest
     /// PKCE Code Verifier
     /// </summary>
     public string? CodeVerifier { get; init; }
+
+    /// <summary>
+    /// DPoP JWK Thumbprint
+    /// </summary>
+    public string? DPoPConfirmationJkt { get; init; }
 
     /// <summary>
     /// 授权类型
@@ -172,6 +177,11 @@ public class TokenValidationResult
     public string? ClientId { get; init; }
 
     /// <summary>
+    /// 令牌确认绑定的 JKT
+    /// </summary>
+    public string? ConfirmationJkt { get; init; }
+
+    /// <summary>
     /// 错误信息
     /// </summary>
     public string? Error { get; init; }
@@ -200,4 +210,9 @@ public class TokenValidationResult
     /// 主题Id
     /// </summary>
     public string? SubjectId { get; init; }
+
+    /// <summary>
+    /// 令牌类型
+    /// </summary>
+    public string TokenType { get; init; } = "Bearer";
 }
