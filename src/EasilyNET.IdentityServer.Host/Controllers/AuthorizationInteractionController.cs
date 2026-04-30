@@ -75,6 +75,7 @@ public class AuthorizationInteractionController(
         }
 
         var approvedScopes = ResolveApprovedScopes(context, command.Scopes);
+        var scopeDetails = await GetScopeDetailsAsync(context, cancellationToken);
 
         if (string.Equals(command.Action, "deny", StringComparison.OrdinalIgnoreCase) || command.ConsentGranted == false)
         {
@@ -144,6 +145,20 @@ public class AuthorizationInteractionController(
             {
                 Title = "No scopes approved",
                 Detail = "At least one requested scope must be approved.",
+                Status = StatusCodes.Status400BadRequest
+            });
+        }
+
+        var missingRequiredScopes = scopeDetails
+            .Where(scope => scope.Required && !approvedScopes.Contains(scope.Name, StringComparer.Ordinal))
+            .Select(scope => scope.Name)
+            .ToArray();
+        if (missingRequiredScopes.Length > 0)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "Required scopes cannot be deselected",
+                Detail = $"The following scopes are required and must remain selected: {string.Join(", ", missingRequiredScopes)}.",
                 Status = StatusCodes.Status400BadRequest
             });
         }

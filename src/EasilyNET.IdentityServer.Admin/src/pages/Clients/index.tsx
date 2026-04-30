@@ -172,6 +172,38 @@ export default function ClientsPage() {
       render: (v: string[]) => v?.map((g: string) => <Tag key={g}>{g}</Tag>),
     },
     {
+      title: 'Prompt 限制',
+      dataIndex: 'authorizationPromptTypes',
+      key: 'authorizationPromptTypes',
+      width: 180,
+      render: (v?: string[]) =>
+        v && v.length > 0 ? (
+          v.map((prompt) => (
+            <Tag key={prompt} color="processing">
+              {prompt}
+            </Tag>
+          ))
+        ) : (
+          <Tag>全部允许</Tag>
+        ),
+    },
+    {
+      title: 'IdP 限制',
+      dataIndex: 'identityProviderRestrictions',
+      key: 'identityProviderRestrictions',
+      width: 180,
+      render: (v?: string[]) =>
+        v && v.length > 0 ? (
+          v.map((provider) => (
+            <Tag key={provider} color="purple">
+              {provider}
+            </Tag>
+          ))
+        ) : (
+          <Tag>全部允许</Tag>
+        ),
+    },
+    {
       title: '操作',
       key: 'action',
       width: 120,

@@ -20,6 +20,11 @@ public interface IAuthorizationScopeMetadataService
 public class AuthorizationScopeDescriptor
 {
     /// <summary>
+    /// 同意页说明文本
+    /// </summary>
+    public string? ConsentDescription { get; init; }
+
+    /// <summary>
     /// 描述
     /// </summary>
     public string? Description { get; init; }
@@ -65,6 +70,16 @@ public class AuthorizationScopeDescriptor
     public required string Type { get; init; }
 
     /// <summary>
+    /// 是否允许用户在 consent 阶段取消选择
+    /// </summary>
+    public bool IsSelectable { get; init; } = true;
+
+    /// <summary>
+    /// 选择受限时的原因
+    /// </summary>
+    public string? SelectionLockedReason { get; init; }
+
+    /// <summary>
     /// 关联资源
     /// </summary>
     public AuthorizationScopeResourceDescriptor[] Resources { get; init; } = [];
@@ -104,4 +119,9 @@ public class AuthorizationScopeResourceDescriptor
     /// 资源级用户声明
     /// </summary>
     public string[] UserClaims { get; init; } = [];
+
+    /// <summary>
+    /// 资源展示分组标签
+    /// </summary>
+    public string? DisplayGroup { get; init; }
 }

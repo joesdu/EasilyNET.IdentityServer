@@ -43,14 +43,18 @@ public class AuthorizationScopeMetadataService(IResourceStore resourceStore) : I
         {
             if (identityResources.TryGetValue(scope, out var identity))
             {
+                var selectable = !identity.Required;
                 descriptors.Add(new AuthorizationScopeDescriptor
                 {
+                    ConsentDescription = BuildConsentDescription(identity.DisplayName ?? identity.Name, identity.Description, identity.UserClaims, identity.Properties),
                     Name = identity.Name,
                     DisplayName = identity.DisplayName,
                     DisplayGroup = "Identity resources",
                     Description = identity.Description,
                     Required = identity.Required,
                     Emphasize = identity.Emphasize,
+                    IsSelectable = selectable,
+                    SelectionLockedReason = selectable ? null : "This scope is required by the identity protocol and cannot be deselected.",
                     Properties = new Dictionary<string, string>(identity.Properties),
                     Resources =
                     [
@@ -77,20 +81,33 @@ public class AuthorizationScopeMetadataService(IResourceStore resourceStore) : I
                     .Concat(resources.SelectMany(resource => resource.UserClaims))
                     .Distinct(StringComparer.Ordinal)
                     .ToArray();
+                var mergedProperties = new Dictionary<string, string>(api.Properties, StringComparer.Ordinal);
+                foreach (var resource in resources)
+                {
+                    foreach (var property in resource.Properties)
+                    {
+                        mergedProperties.TryAdd(property.Key, property.Value);
+                    }
+                }
+                var selectable = !api.Required;
+                var group = resources.Length switch
+                {
+                    0 => "API permissions",
+                    1 => resources[0].DisplayName ?? resources[0].Name,
+                    _ => "API permissions"
+                };
                 descriptors.Add(new AuthorizationScopeDescriptor
                 {
+                    ConsentDescription = BuildConsentDescription(api.DisplayName ?? api.Name, api.Description, mergedClaims, mergedProperties),
                     Name = api.Name,
                     DisplayName = api.DisplayName,
-                    DisplayGroup = resources.Length switch
-                    {
-                        0 => "API permissions",
-                        1 => resources[0].DisplayName ?? resources[0].Name,
-                        _ => "API permissions"
-                    },
+                    DisplayGroup = group,
                     Description = api.Description,
                     Required = api.Required,
                     Emphasize = api.Emphasize,
-                    Properties = new Dictionary<string, string>(api.Properties),
+                    IsSelectable = selectable,
+                    SelectionLockedReason = selectable ? null : "This API permission is required by the client and cannot be deselected.",
+                    Properties = mergedProperties,
                     Resources = resources,
                     UserClaims = mergedClaims,
                     Selected = selected.Contains(api.Name),
@@ -101,12 +118,15 @@ public class AuthorizationScopeMetadataService(IResourceStore resourceStore) : I
 
             descriptors.Add(new AuthorizationScopeDescriptor
             {
+                ConsentDescription = $"Grant access to '{scope}'.",
                 Name = scope,
                 DisplayName = scope,
                 DisplayGroup = "Other permissions",
                 Description = null,
                 Required = false,
                 Emphasize = false,
+                IsSelectable = true,
+                SelectionLockedReason = null,
                 Properties = new Dictionary<string, string>(),
                 Resources = [],
                 UserClaims = [],
@@ -116,5 +136,24 @@ public class AuthorizationScopeMetadataService(IResourceStore resourceStore) : I
         }
 
         return descriptors;
+    }
+
+    private static string BuildConsentDescription(string name, string? description, IEnumerable<string> claims, IDictionary<string, string> properties)
+    {
+        var claimList = claims.Distinct(StringComparer.Ordinal).ToArray();
+        var audience = properties.TryGetValue("audience", out var audienceValue) ? audienceValue : null;
+
+        var parts = new List<string> { description ?? $"Allow access to {name}." };
+        if (claimList.Length > 0)
+        {
+            parts.Add($"Claims: {string.Join(", ", claimList)}.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(audience))
+        {
+            parts.Add($"Audience: {audience}.");
+        }
+
+        return string.Join(" ", parts);
     }
 }

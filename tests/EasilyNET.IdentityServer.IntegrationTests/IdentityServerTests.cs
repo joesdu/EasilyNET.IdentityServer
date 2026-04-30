@@ -594,6 +594,9 @@ public class IdentityServerTests
         var requestedScopeDetails = consentInteraction.GetProperty("requestedScopeDetails").EnumerateArray().ToArray();
         Assert.AreEqual(3, requestedScopeDetails.Length);
         Assert.IsTrue(requestedScopeDetails.Any(scope => scope.GetProperty("name").GetString() == "openid" && scope.GetProperty("required").GetBoolean() && scope.GetProperty("type").GetString() == "identity"));
+        Assert.IsTrue(requestedScopeDetails.Any(scope => scope.GetProperty("name").GetString() == "openid" && !scope.GetProperty("isSelectable").GetBoolean()));
+        Assert.IsTrue(requestedScopeDetails.Any(scope => scope.GetProperty("name").GetString() == "openid" && scope.GetProperty("selectionLockedReason").GetString()!.Contains("cannot be deselected", StringComparison.Ordinal)));
+        Assert.IsTrue(requestedScopeDetails.Any(scope => scope.GetProperty("name").GetString() == "api1" && scope.GetProperty("consentDescription").GetString()!.Contains("Audience: api1", StringComparison.Ordinal)));
         Assert.IsTrue(requestedScopeDetails.Any(scope => scope.GetProperty("name").GetString() == "profile" && scope.GetProperty("emphasize").GetBoolean()));
         Assert.IsTrue(requestedScopeDetails.Any(scope => scope.GetProperty("name").GetString() == "api1" && scope.GetProperty("displayName").GetString() == "API 1 Access" && scope.GetProperty("type").GetString() == "api"));
         Assert.IsTrue(requestedScopeDetails.Any(scope => scope.GetProperty("name").GetString() == "openid" && scope.GetProperty("displayGroup").GetString() == "Identity resources"));
@@ -629,6 +632,42 @@ public class IdentityServerTests
 
         var expiredContextResponse = await _client.GetAsync($"/connect/authorize/context/{requestId}");
         Assert.AreEqual(HttpStatusCode.NotFound, expiredContextResponse.StatusCode);
+    }
+
+    /// <summary>
+    /// Test consent interaction rejects attempts to deselect required scopes
+    /// </summary>
+    [TestMethod]
+    public async Task AuthorizationInteraction_Consent_CannotDeselectRequiredScopes()
+    {
+        var verifier = CreateCodeVerifier();
+        var challenge = CreateCodeChallenge(verifier);
+        var response = await _client.GetAsync($"/connect/authorize?response_type=code&client_id=interactive&redirect_uri={Uri.EscapeDataString("http://localhost:3000/interactive-callback")}&scope=openid%20profile%20api1&state=required-scope&code_challenge={challenge}&code_challenge_method=S256");
+
+        Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
+        var interactionJson = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+        var requestId = interactionJson.RootElement.GetProperty("requestId").GetString()!;
+
+        var loginResponse = await _client.SendAsync(PostJson("/connect/authorize/interaction", new
+        {
+            requestId,
+            action = "login",
+            subjectId = "alice"
+        }));
+        loginResponse.EnsureSuccessStatusCode();
+
+        var consentResponse = await _client.SendAsync(PostJson("/connect/authorize/interaction", new
+        {
+            requestId,
+            action = "consent",
+            consentGranted = true,
+            scopes = new[] { "api1" }
+        }));
+
+        Assert.AreEqual(HttpStatusCode.BadRequest, consentResponse.StatusCode);
+        var problemJson = await JsonDocument.ParseAsync(await consentResponse.Content.ReadAsStreamAsync());
+        Assert.AreEqual("Required scopes cannot be deselected", problemJson.RootElement.GetProperty("title").GetString());
+        StringAssert.Contains(problemJson.RootElement.GetProperty("detail").GetString(), "openid");
     }
 
     /// <summary>
