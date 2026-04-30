@@ -68,12 +68,14 @@ public class DeviceAuthorizationController : ControllerBase
         // Generate codes
         var deviceCode = GenerateCode(32);
         var userCode = GenerateUserCode();
+        var hashedDeviceCode = DeviceFlowCodeHasher.HashDeviceCode(deviceCode);
+        var hashedUserCode = DeviceFlowCodeHasher.HashUserCode(userCode);
         var lifetime = client.DeviceCodeLifetime > 0 ? client.DeviceCodeLifetime : _options.DeviceCodeLifetime;
         var interval = client.DevicePollingInterval > 0 ? client.DevicePollingInterval : DefaultPollingIntervalSeconds;
         var deviceCodeData = new DeviceCodeData
         {
-            Code = deviceCode,
-            UserCode = userCode,
+            Code = hashedDeviceCode,
+            UserCode = hashedUserCode,
             ClientId = clientId,
             CreationTime = DateTime.UtcNow,
             ExpirationTime = DateTime.UtcNow.AddSeconds(lifetime),
@@ -110,7 +112,8 @@ public class DeviceAuthorizationController : ControllerBase
         {
             return BadRequest(new { error = "invalid_request", error_description = "user_code and subject_id are required" });
         }
-        var deviceCode = await _deviceFlowStore.FindByUserCodeAsync(userCode, ct);
+        var hashedUserCode = DeviceFlowCodeHasher.HashUserCode(userCode);
+        var deviceCode = await _deviceFlowStore.FindByUserCodeAsync(hashedUserCode, ct);
         if (deviceCode == null)
         {
             return BadRequest(new { error = "invalid_grant", error_description = "Invalid user code" });

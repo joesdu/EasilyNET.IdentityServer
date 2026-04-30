@@ -12,6 +12,7 @@ namespace EasilyNET.IdentityServer.Core.Services;
 /// </summary>
 public class AuthorizationService : IAuthorizationService
 {
+    private static readonly string[] SupportedPromptValues = ["none", "login", "consent", "select_account"];
     private readonly IClientStore _clientStore;
     private readonly IUserConsentStore? _consentStore;
     private readonly IPersistedGrantStore _grantStore;
@@ -38,6 +39,38 @@ public class AuthorizationService : IAuthorizationService
     /// <inheritdoc />
     public async Task<AuthorizationResult> ValidateAuthorizationRequestAsync(AuthorizationRequest request, CancellationToken cancellationToken = default)
     {
+        var prompts = ParsePromptValues(request.Prompt);
+        var unsupportedPrompts = prompts.Where(prompt => !SupportedPromptValues.Contains(prompt, StringComparer.Ordinal)).ToArray();
+        if (unsupportedPrompts.Length > 0)
+        {
+            return new()
+            {
+                IsSuccess = false,
+                Error = "invalid_request",
+                ErrorDescription = $"Unsupported prompt value(s): {string.Join(", ", unsupportedPrompts)}"
+            };
+        }
+
+        if (prompts.Contains("none", StringComparer.Ordinal) && prompts.Length > 1)
+        {
+            return new()
+            {
+                IsSuccess = false,
+                Error = "invalid_request",
+                ErrorDescription = "prompt=none must not be combined with other prompt values"
+            };
+        }
+
+        if (request.MaxAge is < 0)
+        {
+            return new()
+            {
+                IsSuccess = false,
+                Error = "invalid_request",
+                ErrorDescription = "max_age must be greater than or equal to 0"
+            };
+        }
+
         // 验证 response_type (OAuth 2.1 只允许 code)
         if (request.ResponseType != "code")
         {
@@ -135,6 +168,13 @@ public class AuthorizationService : IAuthorizationService
             NeedsLogin = true // 由调用方判断用户是否已登录
         };
     }
+
+    private static string[] ParsePromptValues(string? prompt) =>
+        string.IsNullOrWhiteSpace(prompt)
+            ? []
+            : prompt.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
 
     /// <inheritdoc />
     public async Task<ApprovedAuthorizationResult> ApproveAuthorizationRequestAsync(ApprovedAuthorizationRequest request, CancellationToken cancellationToken = default)

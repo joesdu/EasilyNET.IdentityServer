@@ -117,6 +117,11 @@ public class AuthorizationRequest
     public string? LoginHint { get; init; }
 
     /// <summary>
+    /// 最大认证年龄（秒）
+    /// </summary>
+    public int? MaxAge { get; init; }
+
+    /// <summary>
     /// Nonce
     /// </summary>
     public string? Nonce { get; init; }

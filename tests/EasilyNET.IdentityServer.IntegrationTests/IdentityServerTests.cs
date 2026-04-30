@@ -373,6 +373,85 @@ public class IdentityServerTests
     }
 
     /// <summary>
+    /// Test prompt=login forces a fresh login interaction even for an authenticated user
+    /// </summary>
+    [TestMethod]
+    public async Task AuthorizationCode_PromptLogin_ReturnsLoginInteractionRequired()
+    {
+        var verifier = CreateCodeVerifier();
+        var challenge = CreateCodeChallenge(verifier);
+        var response = await _client.GetAsync($"/connect/authorize?response_type=code&client_id=spa&redirect_uri={Uri.EscapeDataString("http://localhost:3000/callback")}&scope=openid%20profile%20api1&prompt=login&code_challenge={challenge}&code_challenge_method=S256&subject_id=test-user");
+
+        Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
+        var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+        Assert.AreEqual("interaction_required", json.RootElement.GetProperty("error").GetString());
+        Assert.AreEqual("login", json.RootElement.GetProperty("interactionType").GetString());
+    }
+
+    /// <summary>
+    /// Test prompt=none cannot be combined with other prompt values
+    /// </summary>
+    [TestMethod]
+    public async Task AuthorizationCode_PromptNoneCombinedWithLogin_ReturnsInvalidRequest()
+    {
+        var verifier = CreateCodeVerifier();
+        var challenge = CreateCodeChallenge(verifier);
+        var response = await _client.GetAsync($"/connect/authorize?response_type=code&client_id=spa&redirect_uri={Uri.EscapeDataString("http://localhost:3000/callback")}&scope=openid%20profile%20api1&prompt=none%20login&code_challenge={challenge}&code_challenge_method=S256&subject_id=test-user");
+
+        var query = System.Web.HttpUtility.ParseQueryString(GetAuthorizationResponseUri(response).Query);
+        Assert.AreEqual("invalid_request", query["error"]);
+    }
+
+    /// <summary>
+    /// Test max_age exceeded returns login interaction for authenticated users
+    /// </summary>
+    [TestMethod]
+    public async Task AuthorizationCode_MaxAgeExceeded_ReturnsLoginInteractionRequired()
+    {
+        var verifier = CreateCodeVerifier();
+        var challenge = CreateCodeChallenge(verifier);
+        var staleAuthTime = DateTimeOffset.UtcNow.AddMinutes(-10).ToUnixTimeSeconds();
+        var response = await _client.GetAsync($"/connect/authorize?response_type=code&client_id=spa&redirect_uri={Uri.EscapeDataString("http://localhost:3000/callback")}&scope=openid%20profile%20api1&max_age=60&auth_time={staleAuthTime}&code_challenge={challenge}&code_challenge_method=S256&subject_id=test-user");
+
+        Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
+        var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+        Assert.AreEqual("interaction_required", json.RootElement.GetProperty("error").GetString());
+        Assert.AreEqual("login", json.RootElement.GetProperty("interactionType").GetString());
+    }
+
+    /// <summary>
+    /// Test max_age exceeded with prompt=none redirects login_required
+    /// </summary>
+    [TestMethod]
+    public async Task AuthorizationCode_MaxAgeExceededWithPromptNone_RedirectsLoginRequired()
+    {
+        var verifier = CreateCodeVerifier();
+        var challenge = CreateCodeChallenge(verifier);
+        var staleAuthTime = DateTimeOffset.UtcNow.AddMinutes(-10).ToUnixTimeSeconds();
+        var response = await _client.GetAsync($"/connect/authorize?response_type=code&client_id=spa&redirect_uri={Uri.EscapeDataString("http://localhost:3000/callback")}&scope=openid%20profile%20api1&prompt=none&max_age=60&auth_time={staleAuthTime}&code_challenge={challenge}&code_challenge_method=S256&subject_id=test-user&state=stale");
+
+        var query = System.Web.HttpUtility.ParseQueryString(GetAuthorizationResponseUri(response).Query);
+        Assert.AreEqual("login_required", query["error"]);
+        Assert.AreEqual("stale", query["state"]);
+    }
+
+    /// <summary>
+    /// Test prompt=select_account returns interaction contract
+    /// </summary>
+    [TestMethod]
+    public async Task AuthorizationCode_SelectAccount_ReturnsInteractionRequired()
+    {
+        var verifier = CreateCodeVerifier();
+        var challenge = CreateCodeChallenge(verifier);
+        var response = await _client.GetAsync($"/connect/authorize?response_type=code&client_id=spa&redirect_uri={Uri.EscapeDataString("http://localhost:3000/callback")}&scope=openid%20profile%20api1&prompt=select_account&code_challenge={challenge}&code_challenge_method=S256&subject_id=test-user");
+
+        Assert.AreEqual(HttpStatusCode.Conflict, response.StatusCode);
+        var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+        Assert.AreEqual("interaction_required", json.RootElement.GetProperty("error").GetString());
+        Assert.AreEqual("select_account", json.RootElement.GetProperty("interactionType").GetString());
+    }
+
+    /// <summary>
     /// Test authorization code with wrong verifier returns invalid grant
     /// </summary>
     [TestMethod]
@@ -515,6 +594,62 @@ public class IdentityServerTests
             ["refresh_token"] = refreshToken
         }));
         Assert.AreEqual(HttpStatusCode.BadRequest, oldRefreshResponse.StatusCode);
+    }
+
+    /// <summary>
+    /// Test refresh token replay revokes the entire refresh token family
+    /// </summary>
+    [TestMethod]
+    public async Task RefreshToken_Replay_RevokesTokenFamily()
+    {
+        var verifier = CreateCodeVerifier();
+        var challenge = CreateCodeChallenge(verifier);
+        var authorizeResponse = await _client.GetAsync($"/connect/authorize?response_type=code&client_id=mvc&redirect_uri={Uri.EscapeDataString("https://localhost:5002/signin-oidc")}&scope=openid%20profile%20api1&state=family-replay&code_challenge={challenge}&code_challenge_method=S256&subject_id=test-user");
+        var query = System.Web.HttpUtility.ParseQueryString(GetAuthorizationResponseUri(authorizeResponse).Query);
+
+        var exchangeResponse = await _client.SendAsync(PostForm("/connect/token", new()
+        {
+            ["grant_type"] = "authorization_code",
+            ["client_id"] = "mvc",
+            ["client_secret"] = "secret",
+            ["code"] = query["code"]!,
+            ["redirect_uri"] = "https://localhost:5002/signin-oidc",
+            ["code_verifier"] = verifier
+        }));
+        exchangeResponse.EnsureSuccessStatusCode();
+        var tokenJson = await JsonDocument.ParseAsync(await exchangeResponse.Content.ReadAsStreamAsync());
+        var originalRefreshToken = tokenJson.RootElement.GetProperty("refresh_token").GetString()!;
+
+        var refreshResponse = await _client.SendAsync(PostForm("/connect/token", new()
+        {
+            ["grant_type"] = "refresh_token",
+            ["client_id"] = "mvc",
+            ["client_secret"] = "secret",
+            ["refresh_token"] = originalRefreshToken
+        }));
+        refreshResponse.EnsureSuccessStatusCode();
+        var refreshedJson = await JsonDocument.ParseAsync(await refreshResponse.Content.ReadAsStreamAsync());
+        var rotatedRefreshToken = refreshedJson.RootElement.GetProperty("refresh_token").GetString()!;
+
+        var replayResponse = await _client.SendAsync(PostForm("/connect/token", new()
+        {
+            ["grant_type"] = "refresh_token",
+            ["client_id"] = "mvc",
+            ["client_secret"] = "secret",
+            ["refresh_token"] = originalRefreshToken
+        }));
+        Assert.AreEqual(HttpStatusCode.BadRequest, replayResponse.StatusCode);
+        var replayJson = await JsonDocument.ParseAsync(await replayResponse.Content.ReadAsStreamAsync());
+        Assert.AreEqual("invalid_grant", replayJson.RootElement.GetProperty("error").GetString());
+
+        var familyRevokedResponse = await _client.SendAsync(PostForm("/connect/token", new()
+        {
+            ["grant_type"] = "refresh_token",
+            ["client_id"] = "mvc",
+            ["client_secret"] = "secret",
+            ["refresh_token"] = rotatedRefreshToken
+        }));
+        Assert.AreEqual(HttpStatusCode.BadRequest, familyRevokedResponse.StatusCode);
     }
 
     /// <summary>
@@ -881,6 +1016,39 @@ public class IdentityServerTests
         Assert.IsTrue(tokenJson.RootElement.TryGetProperty("access_token", out var at));
         Assert.IsFalse(string.IsNullOrEmpty(at.GetString()));
         Assert.AreEqual("Bearer", tokenJson.RootElement.GetProperty("token_type").GetString());
+    }
+
+    /// <summary>
+    /// Test device user code verification accepts normalized input
+    /// </summary>
+    [TestMethod]
+    public async Task DeviceCode_VerifyUserCode_IsCaseInsensitive()
+    {
+        var authResponse = await _client.SendAsync(PostForm("/connect/device_authorization", new()
+        {
+            ["client_id"] = "device",
+            ["scope"] = "openid api1"
+        }));
+        authResponse.EnsureSuccessStatusCode();
+        var authJson = await JsonDocument.ParseAsync(await authResponse.Content.ReadAsStreamAsync());
+        var deviceCode = authJson.RootElement.GetProperty("device_code").GetString()!;
+        var userCode = authJson.RootElement.GetProperty("user_code").GetString()!;
+        var normalizedUserCode = userCode.Replace("-", string.Empty, StringComparison.Ordinal).ToLowerInvariant();
+
+        var verifyResponse = await _client.SendAsync(PostForm("/connect/device_verify", new()
+        {
+            ["user_code"] = normalizedUserCode,
+            ["subject_id"] = "test-user-normalized"
+        }));
+        verifyResponse.EnsureSuccessStatusCode();
+
+        var tokenResponse = await _client.SendAsync(PostForm("/connect/token", new()
+        {
+            ["grant_type"] = "urn:ietf:params:oauth:grant-type:device_code",
+            ["client_id"] = "device",
+            ["device_code"] = deviceCode
+        }));
+        tokenResponse.EnsureSuccessStatusCode();
     }
 
     #endregion

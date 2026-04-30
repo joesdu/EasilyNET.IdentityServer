@@ -51,6 +51,8 @@ public class AuthorizeController : ControllerBase
         [FromQuery]
         string? prompt,
         [FromQuery]
+        int? max_age,
+        [FromQuery]
         string? login_hint,
         CancellationToken cancellationToken)
     {
@@ -101,6 +103,7 @@ public class AuthorizeController : ControllerBase
             CodeChallenge = code_challenge,
             CodeChallengeMethod = code_challenge_method,
             Prompt = prompt,
+            MaxAge = max_age,
             LoginHint = login_hint
         }, cancellationToken);
         if (!validation.IsSuccess)
@@ -116,30 +119,40 @@ public class AuthorizeController : ControllerBase
         }
 
         var prompts = SplitPrompt(prompt);
+        var authContext = ResolveAuthenticationContext();
+        var subjectId = authContext.SubjectId;
+        var requiresFreshLogin = max_age.HasValue && !HasFreshAuthentication(authContext.AuthenticationTime, max_age.Value);
 
-        // 处理 prompt 参数 (OIDC)
-        var subjectId = ResolveSubjectId();
-
-        // 根据 prompt 参数处理
-        if (prompts.Length > 0)
+        if (prompts.Contains("select_account", StringComparer.Ordinal))
         {
-            // prompt=none: 不能显示登录或consent页面
             if (prompts.Contains("none", StringComparer.Ordinal))
             {
-                if (string.IsNullOrEmpty(subjectId))
-                {
-                    // 用户未登录且 prompt=none
-                    return RedirectWithError(redirect_uri, state, "login_required", "User is not authenticated");
-                }
-                // 注意: 实际实现应该检查是否存在有效的 session 且用户已同意
+                return RedirectWithError(redirect_uri, state, "account_selection_required", "The request requires end-user account selection");
             }
 
-            // prompt=login: 强制重新认证
-            if (prompts.Contains("login", StringComparer.Ordinal))
-            {
-                // 强制重新登录 - 清除现有 subjectId
-                subjectId = string.Empty;
-            }
+            return BuildInteractionRequiredResponse(StatusCodes.Status409Conflict, "select_account", client, validation.RequestId!, requestedScopes, redirect_uri, state,
+                "Account selection is required", login_hint);
+        }
+
+        if (prompts.Contains("login", StringComparer.Ordinal))
+        {
+            return BuildLoginInteractionResponse(prompts.Contains("none", StringComparer.Ordinal), redirect_uri, state, client, validation.RequestId!, requestedScopes, login_hint,
+                prompts.Contains("none", StringComparer.Ordinal)
+                    ? "The request requires user re-authentication"
+                    : "User re-authentication is required");
+        }
+
+        if (requiresFreshLogin)
+        {
+            return BuildLoginInteractionResponse(prompts.Contains("none", StringComparer.Ordinal), redirect_uri, state, client, validation.RequestId!, requestedScopes, login_hint,
+                prompts.Contains("none", StringComparer.Ordinal)
+                    ? "The authenticated session is too old"
+                    : "User re-authentication is required because max_age was exceeded");
+        }
+
+        if (prompts.Contains("none", StringComparer.Ordinal) && string.IsNullOrEmpty(subjectId))
+        {
+            return RedirectWithError(redirect_uri, state, "login_required", "User is not authenticated");
         }
 
         // 检查用户是否已登录
@@ -227,6 +240,69 @@ public class AuthorizeController : ControllerBase
     private static string[] SplitPrompt(string? prompt) =>
         string.IsNullOrWhiteSpace(prompt) ? [] : prompt.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
+    private IActionResult BuildLoginInteractionResponse(
+        bool redirectForPromptNone,
+        string redirectUri,
+        string? state,
+        Client client,
+        string requestId,
+        IEnumerable<string> requestedScopes,
+        string? loginHint,
+        string detail)
+    {
+        return redirectForPromptNone
+            ? RedirectWithError(redirectUri, state, "login_required", detail)
+            : BuildInteractionRequiredResponse(StatusCodes.Status401Unauthorized, "login", client, requestId, requestedScopes, redirectUri, state, detail, loginHint);
+    }
+
+    private static bool HasFreshAuthentication(DateTimeOffset? authenticationTime, int maxAgeSeconds)
+    {
+        if (authenticationTime == null)
+        {
+            return false;
+        }
+
+        return DateTimeOffset.UtcNow - authenticationTime.Value <= TimeSpan.FromSeconds(maxAgeSeconds);
+    }
+
+    private AuthenticationContext ResolveAuthenticationContext() =>
+        new(ResolveSubjectId(), ResolveAuthenticationTime());
+
+    private DateTimeOffset? ResolveAuthenticationTime()
+    {
+        var authTimeValue = User.FindFirstValue("auth_time");
+        if (TryParseAuthenticationTime(authTimeValue, out var authTime))
+        {
+            return authTime;
+        }
+
+        var headerAuthTime = Request.Headers["X-Auth-Time"].ToString();
+        if (TryParseAuthenticationTime(headerAuthTime, out authTime))
+        {
+            return authTime;
+        }
+
+        var queryAuthTime = Request.Query["auth_time"].ToString();
+        return TryParseAuthenticationTime(queryAuthTime, out authTime) ? authTime : null;
+    }
+
+    private static bool TryParseAuthenticationTime(string? value, out DateTimeOffset authTime)
+    {
+        authTime = default;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        if (long.TryParse(value, out var epochSeconds))
+        {
+            authTime = DateTimeOffset.FromUnixTimeSeconds(epochSeconds);
+            return true;
+        }
+
+        return DateTimeOffset.TryParse(value, out authTime);
+    }
+
     private string? ResolveSubjectId()
     {
         var principalSubjectId = User.FindFirstValue("sub") ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
@@ -297,3 +373,5 @@ internal sealed class AuthorizationInteractionResponse
 
     public string? State { get; init; }
 }
+
+internal sealed record AuthenticationContext(string? SubjectId, DateTimeOffset? AuthenticationTime);

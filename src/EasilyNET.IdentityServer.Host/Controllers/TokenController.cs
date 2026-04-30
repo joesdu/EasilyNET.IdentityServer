@@ -5,7 +5,6 @@ using EasilyNET.IdentityServer.Abstractions.Models;
 using EasilyNET.IdentityServer.Abstractions.Services;
 using EasilyNET.IdentityServer.Abstractions.Stores;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace EasilyNET.IdentityServer.Host.Controllers;
@@ -233,7 +232,7 @@ public class TokenController : ControllerBase
             return BadRequest(new TokenErrorResponse("invalid_request", "refresh_token is required"));
         }
         var grant = await _grantStore.GetAsync(refreshToken, ct);
-        if (grant?.Type == ConsumedRefreshTokenType && grant.ClientId == client.ClientId)
+        if (grant != null && IsConsumedRefreshToken(grant, client.ClientId))
         {
             await RevokeRefreshTokenFamilyAsync(grant, ct);
             return BadRequest(new TokenErrorResponse("invalid_grant", "Refresh token reuse detected"));
@@ -259,7 +258,18 @@ public class TokenController : ControllerBase
             }
         }
 
-        var originalScopes = (grant.Properties.TryGetValue("scope", out var originalScopeValue) ? originalScopeValue : null)?.Split(' ', StringSplitOptions.RemoveEmptyEntries) ?? client.AllowedScopes.ToArray();
+        var originalGrant = await _grantStore.TryConsumeAsync(refreshToken, RefreshTokenType, client.ClientId, ct);
+        if (originalGrant == null)
+        {
+            var consumedGrant = await _grantStore.GetAsync(refreshToken, ct);
+            if (IsConsumedRefreshToken(consumedGrant, client.ClientId))
+            {
+                await RevokeRefreshTokenFamilyAsync(consumedGrant!, ct);
+            }
+            return BadRequest(new TokenErrorResponse("invalid_grant", "Refresh token reuse detected"));
+        }
+
+        var originalScopes = (originalGrant.Properties.TryGetValue("scope", out var originalScopeValue) ? originalScopeValue : null)?.Split(' ', StringSplitOptions.RemoveEmptyEntries) ?? client.AllowedScopes.ToArray();
         var requestedScope = form["scope"].ToString();
         var scopes = string.IsNullOrEmpty(requestedScope) ? originalScopes : requestedScope.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (!IsSubset(scopes, originalScopes))
@@ -273,45 +283,43 @@ public class TokenController : ControllerBase
         if (isPublicClient)
         {
             // 公开客户端：使用一次性刷新令牌，旧令牌会留下已消费标记用于重放检测
-            await MarkRefreshTokenConsumedAsync(grant, ct);
-            var nonce = grant.Properties.TryGetValue("nonce", out var n) ? n : null;
+            var nonce = originalGrant.Properties.TryGetValue("nonce", out var n) ? n : null;
             var result = await _tokenService.CreateAccessTokenAsync(new()
             {
                 Client = client,
                 GrantType = GrantType.RefreshToken,
                 Scopes = scopes,
-                SubjectId = grant.SubjectId,
+                SubjectId = originalGrant.SubjectId,
                 Nonce = nonce
             }, ct);
 
             // 记录审计日志
-            await _auditService.LogRefreshTokenUsedAsync(client.ClientId, grant.SubjectId, false, GetClientIpAddress(), ct);
-            await _auditService.LogTokenIssuedAsync(client.ClientId, grant.SubjectId, GrantType.RefreshToken,
+            await _auditService.LogRefreshTokenUsedAsync(client.ClientId, originalGrant.SubjectId, false, GetClientIpAddress(), ct);
+            await _auditService.LogTokenIssuedAsync(client.ClientId, originalGrant.SubjectId, GrantType.RefreshToken,
                 scopes, GetClientIpAddress(), ct);
 
-            await StoreRefreshTokenGrantAsync(client, grant.SubjectId, scopes, result, nonce, ct, GetRefreshTokenFamilyId(grant));
+            await StoreRefreshTokenGrantAsync(client, originalGrant.SubjectId, scopes, result, nonce, ct, GetRefreshTokenFamilyId(originalGrant));
             return Ok(new TokenSuccessResponse(result));
         }
 
         // 机密客户端：使用标准滑动窗口刷新令牌（轮换机制）
         // Refresh Token 轮换 (OAuth 2.1 要求)
-        await MarkRefreshTokenConsumedAsync(grant, ct);
-        var refreshNonce = grant.Properties.TryGetValue("nonce", out var rn) ? rn : null;
+        var refreshNonce = originalGrant.Properties.TryGetValue("nonce", out var rn) ? rn : null;
         var tokenResult = await _tokenService.CreateAccessTokenAsync(new()
         {
             Client = client,
             GrantType = GrantType.RefreshToken,
             Scopes = scopes,
-            SubjectId = grant.SubjectId,
+            SubjectId = originalGrant.SubjectId,
             Nonce = refreshNonce
         }, ct);
 
         // 存储新的 Refresh Token
-        await StoreRefreshTokenGrantAsync(client, grant.SubjectId, scopes, tokenResult, refreshNonce, ct, GetRefreshTokenFamilyId(grant));
+        await StoreRefreshTokenGrantAsync(client, originalGrant.SubjectId, scopes, tokenResult, refreshNonce, ct, GetRefreshTokenFamilyId(originalGrant));
 
         // 记录审计日志
-        await _auditService.LogRefreshTokenUsedAsync(client.ClientId, grant.SubjectId, true, GetClientIpAddress(), ct);
-        await _auditService.LogTokenIssuedAsync(client.ClientId, grant.SubjectId, GrantType.RefreshToken,
+        await _auditService.LogRefreshTokenUsedAsync(client.ClientId, originalGrant.SubjectId, true, GetClientIpAddress(), ct);
+        await _auditService.LogTokenIssuedAsync(client.ClientId, originalGrant.SubjectId, GrantType.RefreshToken,
             scopes, GetClientIpAddress(), ct);
 
         return Ok(new TokenSuccessResponse(tokenResult));
@@ -328,7 +336,8 @@ public class TokenController : ControllerBase
         {
             return BadRequest(new TokenErrorResponse("unauthorized_client", "Client is not authorized for device_code grant"));
         }
-        var deviceCodeData = await _deviceFlowStore.FindByDeviceCodeAsync(deviceCode, ct);
+        var hashedDeviceCode = DeviceFlowCodeHasher.HashDeviceCode(deviceCode);
+        var deviceCodeData = await _deviceFlowStore.FindByDeviceCodeAsync(hashedDeviceCode, ct);
         if (deviceCodeData == null || deviceCodeData.ClientId != client.ClientId)
         {
             return BadRequest(new TokenErrorResponse("invalid_grant", "Invalid device code"));
@@ -337,7 +346,7 @@ public class TokenController : ControllerBase
         // Check expiration
         if (deviceCodeData.ExpirationTime < DateTime.UtcNow)
         {
-            await _deviceFlowStore.RemoveAsync(deviceCode, ct);
+            await _deviceFlowStore.RemoveAsync(hashedDeviceCode, ct);
             return BadRequest(new TokenErrorResponse("expired_token", "Device code has expired"));
         }
 
@@ -361,7 +370,7 @@ public class TokenController : ControllerBase
         }
 
         // User has authorized - 原子消费设备代码并签发令牌
-        var consumedDeviceCode = await _deviceFlowStore.TryConsumeDeviceCodeAsync(deviceCode, client.ClientId, ct);
+        var consumedDeviceCode = await _deviceFlowStore.TryConsumeDeviceCodeAsync(hashedDeviceCode, client.ClientId, ct);
         if (consumedDeviceCode == null)
         {
             return BadRequest(new TokenErrorResponse("invalid_grant", "Device code has already been used"));
@@ -378,7 +387,7 @@ public class TokenController : ControllerBase
         }, ct);
 
         // Clean up
-        await _deviceFlowStore.RemoveAsync(deviceCode, ct);
+        await _deviceFlowStore.RemoveAsync(hashedDeviceCode, ct);
         return Ok(new TokenSuccessResponse(result));
     }
 
@@ -515,23 +524,10 @@ public class TokenController : ControllerBase
         }, ct);
     }
 
-    private async Task MarkRefreshTokenConsumedAsync(PersistedGrant grant, CancellationToken ct)
-    {
-        await _grantStore.StoreAsync(new()
-        {
-            Key = grant.Key,
-            Type = ConsumedRefreshTokenType,
-            SubjectId = grant.SubjectId,
-            ClientId = grant.ClientId,
-            SessionId = grant.SessionId,
-            Description = grant.Description,
-            CreationTime = grant.CreationTime,
-            ExpirationTime = grant.ExpirationTime,
-            ConsumedTime = DateTime.UtcNow,
-            Data = grant.Data,
-            Properties = grant.Properties
-        }, ct);
-    }
+    private static bool IsConsumedRefreshToken(PersistedGrant? grant, string clientId) =>
+        grant != null &&
+        grant.ClientId == clientId &&
+        (grant.Type == ConsumedRefreshTokenType || (grant.Type == RefreshTokenType && grant.ConsumedTime.HasValue));
 
     private async Task RevokeTokensIssuedFromAuthorizationCodeAsync(PersistedGrant grant, CancellationToken ct)
     {
