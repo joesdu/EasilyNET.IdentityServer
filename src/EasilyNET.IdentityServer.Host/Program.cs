@@ -59,6 +59,7 @@ builder.Services.AddSingleton<IResourceStore, InMemoryResourceStore>();
 builder.Services.AddSingleton<IPersistedGrantStore, InMemoryPersistedGrantStore>();
 builder.Services.AddSingleton<IDeviceFlowStore, InMemoryDeviceFlowStore>();
 builder.Services.AddSingleton<IUserConsentStore, InMemoryUserConsentStore>();
+builder.Services.AddSingleton<IAuthorizationAccountService, InMemoryAuthorizationAccountService>();
 builder.Services.AddSingleton<ISigningKeyStore, InMemorySigningKeyStore>();
 builder.Services.AddSingleton<IAuditLogStore, InMemoryAuditLogStore>();
 

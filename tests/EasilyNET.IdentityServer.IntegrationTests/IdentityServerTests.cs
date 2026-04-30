@@ -428,7 +428,7 @@ public class IdentityServerTests
         {
             requestId,
             action = "login",
-            subjectId = "interactive-user"
+            subjectId = "alice"
         }));
         continueResponse.EnsureSuccessStatusCode();
 
@@ -521,6 +521,88 @@ public class IdentityServerTests
         var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
         Assert.AreEqual("interaction_required", json.RootElement.GetProperty("error").GetString());
         Assert.AreEqual("select_account", json.RootElement.GetProperty("interactionType").GetString());
+    }
+
+    /// <summary>
+    /// Test select_account context exposes filtered account candidates for the UI
+    /// </summary>
+    [TestMethod]
+    public async Task AuthorizationInteraction_SelectAccountContext_ReturnsAccountCandidates()
+    {
+        var verifier = CreateCodeVerifier();
+        var challenge = CreateCodeChallenge(verifier);
+        var response = await _client.GetAsync($"/connect/authorize?response_type=code&client_id=spa&redirect_uri={Uri.EscapeDataString("http://localhost:3000/callback")}&scope=openid%20profile%20api1&prompt=select_account&login_hint={Uri.EscapeDataString("alice@example.com")}&code_challenge={challenge}&code_challenge_method=S256");
+
+        Assert.AreEqual(HttpStatusCode.Conflict, response.StatusCode);
+        var interactionJson = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+        var contextEndpoint = interactionJson.RootElement.GetProperty("contextEndpoint").GetString();
+
+        var contextResponse = await _client.GetAsync(contextEndpoint!);
+        contextResponse.EnsureSuccessStatusCode();
+        var contextJson = await JsonDocument.ParseAsync(await contextResponse.Content.ReadAsStreamAsync());
+
+        var availableAccounts = contextJson.RootElement.GetProperty("availableAccounts").EnumerateArray().ToArray();
+        Assert.AreEqual(1, availableAccounts.Length);
+        Assert.AreEqual("alice", availableAccounts[0].GetProperty("subjectId").GetString());
+        Assert.AreEqual("alice@example.com", availableAccounts[0].GetProperty("loginHint").GetString());
+        Assert.IsFalse(contextJson.RootElement.TryGetProperty("selectedAccount", out var selectedAccount) && selectedAccount.ValueKind == JsonValueKind.Object);
+    }
+
+    /// <summary>
+    /// Test login and consent can complete across multiple interaction calls while persisting selected subject state
+    /// </summary>
+    [TestMethod]
+    public async Task AuthorizationInteraction_LoginThenConsent_PersistsSelectedSubjectAcrossSteps()
+    {
+        var verifier = CreateCodeVerifier();
+        var challenge = CreateCodeChallenge(verifier);
+        var response = await _client.GetAsync($"/connect/authorize?response_type=code&client_id=interactive&redirect_uri={Uri.EscapeDataString("http://localhost:3000/interactive-callback")}&scope=openid%20profile%20api1&state=consent-chain&code_challenge={challenge}&code_challenge_method=S256");
+
+        Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
+        var interactionJson = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+        var requestId = interactionJson.RootElement.GetProperty("requestId").GetString()!;
+
+        var loginResponse = await _client.SendAsync(PostJson("/connect/authorize/interaction", new
+        {
+            requestId,
+            action = "login",
+            subjectId = "alice"
+        }));
+        loginResponse.EnsureSuccessStatusCode();
+
+        var loginJson = await JsonDocument.ParseAsync(await loginResponse.Content.ReadAsStreamAsync());
+        Assert.AreEqual("interaction_required", loginJson.RootElement.GetProperty("outcome").GetString());
+        var consentInteraction = loginJson.RootElement.GetProperty("interaction");
+        Assert.AreEqual("consent", consentInteraction.GetProperty("interactionType").GetString());
+        Assert.AreEqual("alice", consentInteraction.GetProperty("subjectId").GetString());
+        Assert.AreEqual("alice", consentInteraction.GetProperty("selectedAccount").GetProperty("subjectId").GetString());
+
+        var contextResponse = await _client.GetAsync($"/connect/authorize/context/{requestId}");
+        contextResponse.EnsureSuccessStatusCode();
+        var contextJson = await JsonDocument.ParseAsync(await contextResponse.Content.ReadAsStreamAsync());
+        Assert.AreEqual("alice", contextJson.RootElement.GetProperty("subjectId").GetString());
+        Assert.AreEqual("alice", contextJson.RootElement.GetProperty("selectedAccount").GetProperty("subjectId").GetString());
+        CollectionAssert.AreEquivalent(new[] { "openid", "profile", "api1" }, contextJson.RootElement.GetProperty("pendingConsentScopes").EnumerateArray().Select(x => x.GetString()!).ToArray());
+
+        var consentResponse = await _client.SendAsync(PostJson("/connect/authorize/interaction", new
+        {
+            requestId,
+            action = "consent",
+            consentGranted = true,
+            rememberConsent = true,
+            scopes = new[] { "openid", "api1" }
+        }));
+        consentResponse.EnsureSuccessStatusCode();
+
+        var consentJson = await JsonDocument.ParseAsync(await consentResponse.Content.ReadAsStreamAsync());
+        Assert.AreEqual("redirect", consentJson.RootElement.GetProperty("outcome").GetString());
+        var redirectUri = new Uri(consentJson.RootElement.GetProperty("redirectUrl").GetString()!);
+        var query = System.Web.HttpUtility.ParseQueryString(redirectUri.Query);
+        Assert.IsFalse(string.IsNullOrWhiteSpace(query["code"]));
+        Assert.AreEqual("consent-chain", query["state"]);
+
+        var expiredContextResponse = await _client.GetAsync($"/connect/authorize/context/{requestId}");
+        Assert.AreEqual(HttpStatusCode.NotFound, expiredContextResponse.StatusCode);
     }
 
     /// <summary>

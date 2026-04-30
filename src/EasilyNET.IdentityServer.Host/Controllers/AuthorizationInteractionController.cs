@@ -10,6 +10,7 @@ namespace EasilyNET.IdentityServer.Host.Controllers;
 [ApiController]
 public class AuthorizationInteractionController(
     IAuthorizationRequestContextService authorizationRequestContextService,
+    IAuthorizationAccountService authorizationAccountService,
     IAuthorizationService authorizationService,
     IdentityServerOptions options) : ControllerBase
 {
@@ -27,6 +28,8 @@ public class AuthorizationInteractionController(
             });
         }
 
+        var availableAccounts = await GetAvailableAccountsAsync(context, cancellationToken);
+
         return Ok(new AuthorizationRequestContextResponse
         {
             RequestId = context.RequestId,
@@ -40,8 +43,12 @@ public class AuthorizationInteractionController(
             LoginHint = context.LoginHint,
             MaxAge = context.MaxAge,
             RequestedScopes = context.RequestedScopes,
+            PendingConsentScopes = context.PendingConsentScopes.Length == 0 ? context.RequestedScopes : context.PendingConsentScopes,
             RequiresConsent = context.RequiresConsent,
             RememberConsentAllowed = context.RememberConsentAllowed,
+            SubjectId = context.SubjectId,
+            SelectedAccount = availableAccounts.FirstOrDefault(account => account.IsCurrent),
+            AvailableAccounts = availableAccounts,
             CreatedAt = context.CreationTime,
             ExpiresAt = context.ExpirationTime,
             ContinueEndpoint = "/connect/authorize/interaction",
@@ -64,6 +71,8 @@ public class AuthorizationInteractionController(
             });
         }
 
+        var approvedScopes = ResolveApprovedScopes(context, command.Scopes);
+
         if (string.Equals(command.Action, "deny", StringComparison.OrdinalIgnoreCase) || command.ConsentGranted == false)
         {
             await authorizationService.DenyAuthorizationRequestAsync(command.RequestId, cancellationToken);
@@ -74,7 +83,48 @@ public class AuthorizationInteractionController(
             });
         }
 
-        var subjectId = command.SubjectId;
+        var subjectId = command.SubjectId ?? context.SubjectId;
+        AuthorizationAccountCandidate? selectedAccount = null;
+
+        if (string.Equals(command.Action, "login", StringComparison.OrdinalIgnoreCase) || string.Equals(command.Action, "select_account", StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.IsNullOrWhiteSpace(subjectId))
+            {
+                return BadRequest(new ProblemDetails
+                {
+                    Title = "subject_id is required",
+                    Detail = $"Action '{command.Action}' requires a subject identifier.",
+                    Status = StatusCodes.Status400BadRequest
+                });
+            }
+
+            selectedAccount = await authorizationAccountService.FindBySubjectIdAsync(subjectId, cancellationToken);
+            if (selectedAccount == null)
+            {
+                return BadRequest(new ProblemDetails
+                {
+                    Title = "Unknown subject_id",
+                    Detail = $"No account candidate was found for subject '{subjectId}'.",
+                    Status = StatusCodes.Status400BadRequest
+                });
+            }
+
+            if (context.IdentityProviderRestrictions.Length > 0 &&
+                !string.IsNullOrWhiteSpace(selectedAccount.IdentityProvider) &&
+                !context.IdentityProviderRestrictions.Contains(selectedAccount.IdentityProvider, StringComparer.OrdinalIgnoreCase))
+            {
+                return BadRequest(new ProblemDetails
+                {
+                    Title = "Identity provider is not allowed",
+                    Detail = $"Account '{subjectId}' uses an identity provider that is not allowed for this client.",
+                    Status = StatusCodes.Status400BadRequest
+                });
+            }
+
+            context = WithUpdatedInteractionState(context, selectedAccount, approvedScopes);
+            await authorizationRequestContextService.StoreAsync(context, cancellationToken);
+        }
+
         if (RequiresSubject(command.Action) && string.IsNullOrWhiteSpace(subjectId))
         {
             return BadRequest(new ProblemDetails
@@ -85,8 +135,7 @@ public class AuthorizationInteractionController(
             });
         }
 
-        var scopes = command.Scopes?.Where(scope => context.RequestedScopes.Contains(scope, StringComparer.Ordinal)).ToArray() ?? context.RequestedScopes;
-        if (scopes.Length == 0)
+        if (approvedScopes.Length == 0)
         {
             return BadRequest(new ProblemDetails
             {
@@ -98,7 +147,8 @@ public class AuthorizationInteractionController(
 
         if (context.RequiresConsent && !string.Equals(command.Action, "consent", StringComparison.OrdinalIgnoreCase))
         {
-            return Ok(BuildInteractionRequiredResponse(context, "consent", "User consent is required"));
+            var availableAccounts = await GetAvailableAccountsAsync(context, cancellationToken);
+            return Ok(BuildInteractionRequiredResponse(context, "consent", "User consent is required", availableAccounts));
         }
 
         var approval = await authorizationService.ApproveAuthorizationRequestAsync(new()
@@ -106,7 +156,7 @@ public class AuthorizationInteractionController(
             ClientId = context.ClientId,
             RequestId = context.RequestId,
             SubjectId = subjectId!,
-            Scopes = scopes,
+            Scopes = approvedScopes,
             RedirectUri = context.RedirectUri,
             Nonce = context.Nonce,
             CodeChallenge = context.CodeChallenge,
@@ -136,7 +186,11 @@ public class AuthorizationInteractionController(
         string.Equals(action, "select_account", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(action, "consent", StringComparison.OrdinalIgnoreCase);
 
-    private AuthorizationInteractionResult BuildInteractionRequiredResponse(AuthorizationRequestContext context, string interactionType, string detail) =>
+    private AuthorizationInteractionResult BuildInteractionRequiredResponse(
+        AuthorizationRequestContext context,
+        string interactionType,
+        string detail,
+        IReadOnlyCollection<AuthorizationAccountCandidate> availableAccounts) =>
         new()
         {
             Outcome = "interaction_required",
@@ -155,6 +209,10 @@ public class AuthorizationInteractionController(
                 RememberConsentAllowed = context.RememberConsentAllowed,
                 Prompt = context.Prompt,
                 MaxAge = context.MaxAge,
+                SubjectId = context.SubjectId,
+                SelectedAccount = availableAccounts.FirstOrDefault(account => account.IsCurrent),
+                AvailableAccounts = availableAccounts.ToArray(),
+                PendingConsentScopes = context.PendingConsentScopes.Length == 0 ? context.RequestedScopes : context.PendingConsentScopes,
                 ContinueEndpoint = "/connect/authorize/interaction",
                 ContextEndpoint = $"/connect/authorize/context/{context.RequestId}",
                 AvailableActions = interactionType switch
@@ -164,6 +222,60 @@ public class AuthorizationInteractionController(
                     _ => ["consent", "deny"]
                 }
             }
+        };
+
+    private async Task<AuthorizationAccountCandidate[]> GetAvailableAccountsAsync(AuthorizationRequestContext context, CancellationToken cancellationToken)
+    {
+        var accounts = await authorizationAccountService.GetAccountsAsync(new AuthorizationAccountQuery
+        {
+            CurrentSubjectId = context.SubjectId,
+            LoginHint = context.LoginHint,
+            IdentityProviderRestrictions = context.IdentityProviderRestrictions
+        }, cancellationToken);
+
+        return accounts.ToArray();
+    }
+
+    private static string[] ResolveApprovedScopes(AuthorizationRequestContext context, string[]? scopes)
+    {
+        var effectiveScopes = scopes?.Where(scope => context.RequestedScopes.Contains(scope, StringComparer.Ordinal)).ToArray();
+        if (effectiveScopes is { Length: > 0 })
+        {
+            return effectiveScopes;
+        }
+
+        return context.PendingConsentScopes.Length == 0 ? context.RequestedScopes : context.PendingConsentScopes;
+    }
+
+    private static AuthorizationRequestContext WithUpdatedInteractionState(
+        AuthorizationRequestContext context,
+        AuthorizationAccountCandidate selectedAccount,
+        string[] approvedScopes) =>
+        new()
+        {
+            RequestId = context.RequestId,
+            ClientId = context.ClientId,
+            ClientName = context.ClientName,
+            ClientUri = context.ClientUri,
+            LogoUri = context.LogoUri,
+            CodeChallenge = context.CodeChallenge,
+            CodeChallengeMethod = context.CodeChallengeMethod,
+            CreationTime = context.CreationTime,
+            ExpirationTime = context.ExpirationTime,
+            IdentityProviderRestrictions = context.IdentityProviderRestrictions,
+            LoginHint = context.LoginHint,
+            MaxAge = context.MaxAge,
+            Nonce = context.Nonce,
+            PendingConsentScopes = approvedScopes,
+            Prompt = context.Prompt,
+            RememberConsentAllowed = context.RememberConsentAllowed,
+            RequiresConsent = context.RequiresConsent,
+            RedirectUri = context.RedirectUri,
+            RequestedScopes = context.RequestedScopes,
+            State = context.State,
+            SubjectId = selectedAccount.SubjectId,
+            SubjectDisplayName = selectedAccount.DisplayName,
+            SubjectIdentityProvider = selectedAccount.IdentityProvider
         };
 
     private string BuildSuccessRedirectUrl(string redirectUri, string code, string? state)
@@ -210,6 +322,8 @@ public class AuthorizationInteractionCommand
 
 public class AuthorizationRequestContextResponse
 {
+    public AuthorizationAccountCandidate[] AvailableAccounts { get; set; } = [];
+
     public string? CancelEndpoint { get; set; }
 
     public required string ClientId { get; set; }
@@ -232,6 +346,8 @@ public class AuthorizationRequestContextResponse
 
     public int? MaxAge { get; set; }
 
+    public string[] PendingConsentScopes { get; set; } = [];
+
     public string? Prompt { get; set; }
 
     public bool RememberConsentAllowed { get; set; }
@@ -244,7 +360,11 @@ public class AuthorizationRequestContextResponse
 
     public bool RequiresConsent { get; set; }
 
+    public AuthorizationAccountCandidate? SelectedAccount { get; set; }
+
     public string? State { get; set; }
+
+    public string? SubjectId { get; set; }
 }
 
 public class AuthorizationInteractionResult
@@ -258,6 +378,8 @@ public class AuthorizationInteractionResult
 
 public class AuthorizationInteractionResponsePayload
 {
+    public AuthorizationAccountCandidate[] AvailableAccounts { get; set; } = [];
+
     public required string ClientId { get; set; }
 
     public string? ClientName { get; set; }
@@ -276,6 +398,8 @@ public class AuthorizationInteractionResponsePayload
 
     public int? MaxAge { get; set; }
 
+    public string[] PendingConsentScopes { get; set; } = [];
+
     public string? Prompt { get; set; }
 
     public bool RememberConsentAllowed { get; set; }
@@ -286,7 +410,11 @@ public class AuthorizationInteractionResponsePayload
 
     public required string[] RequestedScopes { get; set; }
 
+    public AuthorizationAccountCandidate? SelectedAccount { get; set; }
+
     public string? State { get; set; }
+
+    public string? SubjectId { get; set; }
 
     public required string[] AvailableActions { get; set; }
 }

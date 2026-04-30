@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using EasilyNET.IdentityServer.Abstractions.Models;
+using EasilyNET.IdentityServer.Abstractions.Services;
 using EasilyNET.IdentityServer.Abstractions.Stores;
 using EasilyNET.IdentityServer.Core.Services;
 
@@ -57,6 +58,19 @@ public class InMemoryClientStore : IClientStore
         });
         _clients.Add(new()
         {
+            ClientId = "interactive",
+            ClientName = "Interactive Consent Client",
+            ClientType = ClientType.Public,
+            Enabled = true,
+            AllowedGrantTypes = [GrantType.AuthorizationCode],
+            RedirectUris = ["http://localhost:3000/interactive-callback"],
+            AllowedScopes = ["openid", "profile", "api1"],
+            RequirePkce = true,
+            RequireClientSecret = false,
+            RequireConsent = true
+        });
+        _clients.Add(new()
+        {
             ClientId = "device",
             ClientName = "Device Client",
             ClientType = ClientType.Public,
@@ -77,6 +91,74 @@ public class InMemoryClientStore : IClientStore
     public Task<IEnumerable<Client>> FindEnabledClientsAsync(CancellationToken cancellationToken = default)
     {
         return Task.FromResult(_clients.Where(c => c.Enabled).AsEnumerable());
+    }
+}
+
+/// <summary>
+/// 内存授权交互账号候选服务
+/// </summary>
+public class InMemoryAuthorizationAccountService : IAuthorizationAccountService
+{
+    private readonly List<AuthorizationAccountCandidate> _accounts =
+    [
+        new()
+        {
+            SubjectId = "alice",
+            DisplayName = "Alice Johnson",
+            LoginHint = "alice@example.com",
+            IdentityProvider = "local"
+        },
+        new()
+        {
+            SubjectId = "bob",
+            DisplayName = "Bob Smith",
+            LoginHint = "bob@example.com",
+            IdentityProvider = "local"
+        },
+        new()
+        {
+            SubjectId = "github-alice",
+            DisplayName = "Alice via GitHub",
+            LoginHint = "alice@github.example",
+            IdentityProvider = "github"
+        }
+    ];
+
+    public Task<IReadOnlyCollection<AuthorizationAccountCandidate>> GetAccountsAsync(AuthorizationAccountQuery query, CancellationToken cancellationToken = default)
+    {
+        IEnumerable<AuthorizationAccountCandidate> accounts = _accounts;
+
+        if (query.IdentityProviderRestrictions.Any())
+        {
+            var allowedProviders = query.IdentityProviderRestrictions.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            accounts = accounts.Where(account => !string.IsNullOrWhiteSpace(account.IdentityProvider) && allowedProviders.Contains(account.IdentityProvider));
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.LoginHint))
+        {
+            accounts = accounts.Where(account =>
+                string.Equals(account.LoginHint, query.LoginHint, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(account.DisplayName, query.LoginHint, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(account.SubjectId, query.LoginHint, StringComparison.OrdinalIgnoreCase));
+        }
+
+        var currentSubjectId = query.CurrentSubjectId;
+        var results = accounts.Select(account => new AuthorizationAccountCandidate
+        {
+            SubjectId = account.SubjectId,
+            DisplayName = account.DisplayName,
+            LoginHint = account.LoginHint,
+            IdentityProvider = account.IdentityProvider,
+            IsCurrent = !string.IsNullOrWhiteSpace(currentSubjectId) && string.Equals(account.SubjectId, currentSubjectId, StringComparison.Ordinal)
+        }).ToArray();
+
+        return Task.FromResult<IReadOnlyCollection<AuthorizationAccountCandidate>>(results);
+    }
+
+    public Task<AuthorizationAccountCandidate?> FindBySubjectIdAsync(string subjectId, CancellationToken cancellationToken = default)
+    {
+        var account = _accounts.FirstOrDefault(candidate => string.Equals(candidate.SubjectId, subjectId, StringComparison.Ordinal));
+        return Task.FromResult(account);
     }
 }
 

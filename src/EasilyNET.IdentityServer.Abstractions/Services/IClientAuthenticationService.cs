@@ -311,6 +311,11 @@ public class AuthorizationRequestContext
     public DateTime ExpirationTime { get; init; }
 
     /// <summary>
+    /// 客户端限制的 Identity Provider
+    /// </summary>
+    public string[] IdentityProviderRestrictions { get; init; } = [];
+
+    /// <summary>
     /// 登录提示
     /// </summary>
     public string? LoginHint { get; init; }
@@ -324,6 +329,11 @@ public class AuthorizationRequestContext
     /// Nonce
     /// </summary>
     public string? Nonce { get; init; }
+
+    /// <summary>
+    /// 待批准的作用域
+    /// </summary>
+    public string[] PendingConsentScopes { get; init; } = [];
 
     /// <summary>
     /// 提示
@@ -349,6 +359,21 @@ public class AuthorizationRequestContext
     /// 请求标识
     /// </summary>
     public required string RequestId { get; init; }
+
+    /// <summary>
+    /// 当前已选中的 subjectId
+    /// </summary>
+    public string? SubjectId { get; init; }
+
+    /// <summary>
+    /// 当前已选中的账号展示名
+    /// </summary>
+    public string? SubjectDisplayName { get; init; }
+
+    /// <summary>
+    /// 当前已选中的 Identity Provider
+    /// </summary>
+    public string? SubjectIdentityProvider { get; init; }
 
     /// <summary>
     /// 请求的作用域
