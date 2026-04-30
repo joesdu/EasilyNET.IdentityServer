@@ -14,15 +14,18 @@ namespace EasilyNET.IdentityServer.Host.Controllers;
 public class AuthorizeController : ControllerBase
 {
     private readonly IAuthorizationService _authorizationService;
+    private readonly IAuthorizationScopeMetadataService _authorizationScopeMetadataService;
     private readonly IUserConsentStore? _consentStore;
     private readonly IdentityServerOptions _options;
 
     public AuthorizeController(
         IAuthorizationService authorizationService,
+        IAuthorizationScopeMetadataService authorizationScopeMetadataService,
         IdentityServerOptions options,
         IUserConsentStore? consentStore = null)
     {
         _authorizationService = authorizationService;
+        _authorizationScopeMetadataService = authorizationScopeMetadataService;
         _options = options;
         _consentStore = consentStore;
     }
@@ -130,13 +133,13 @@ public class AuthorizeController : ControllerBase
                 return RedirectWithError(redirect_uri, state, "account_selection_required", "The request requires end-user account selection");
             }
 
-            return BuildInteractionRequiredResponse(StatusCodes.Status409Conflict, "select_account", client, validation.RequestId!, requestedScopes, redirect_uri, state,
+            return await BuildInteractionRequiredResponse(StatusCodes.Status409Conflict, "select_account", client, validation.RequestId!, requestedScopes, redirect_uri, state,
                 "Account selection is required", login_hint, prompt, max_age);
         }
 
         if (prompts.Contains("login", StringComparer.Ordinal))
         {
-            return BuildLoginInteractionResponse(prompts.Contains("none", StringComparer.Ordinal), redirect_uri, state, client, validation.RequestId!, requestedScopes, login_hint,
+            return await BuildLoginInteractionResponse(prompts.Contains("none", StringComparer.Ordinal), redirect_uri, state, client, validation.RequestId!, requestedScopes, login_hint,
                 prompt,
                 max_age,
                 prompts.Contains("none", StringComparer.Ordinal)
@@ -146,7 +149,7 @@ public class AuthorizeController : ControllerBase
 
         if (requiresFreshLogin)
         {
-            return BuildLoginInteractionResponse(prompts.Contains("none", StringComparer.Ordinal), redirect_uri, state, client, validation.RequestId!, requestedScopes, login_hint,
+            return await BuildLoginInteractionResponse(prompts.Contains("none", StringComparer.Ordinal), redirect_uri, state, client, validation.RequestId!, requestedScopes, login_hint,
                 prompt,
                 max_age,
                 prompts.Contains("none", StringComparer.Ordinal)
@@ -162,7 +165,7 @@ public class AuthorizeController : ControllerBase
         // 检查用户是否已登录
         if (string.IsNullOrEmpty(subjectId))
         {
-            return BuildInteractionRequiredResponse(StatusCodes.Status401Unauthorized, "login", client, validation.RequestId!, requestedScopes, redirect_uri, state,
+            return await BuildInteractionRequiredResponse(StatusCodes.Status401Unauthorized, "login", client, validation.RequestId!, requestedScopes, redirect_uri, state,
                 "User authentication is required", login_hint, prompt, max_age);
         }
 
@@ -186,7 +189,7 @@ public class AuthorizeController : ControllerBase
 
         if (needsConsent && !consentAccepted)
         {
-            return BuildInteractionRequiredResponse(StatusCodes.Status403Forbidden, "consent", client, validation.RequestId!, requestedScopes, redirect_uri, state,
+            return await BuildInteractionRequiredResponse(StatusCodes.Status403Forbidden, "consent", client, validation.RequestId!, requestedScopes, redirect_uri, state,
                 "User consent is required", login_hint, prompt, max_age);
         }
 
@@ -244,7 +247,7 @@ public class AuthorizeController : ControllerBase
     private static string[] SplitPrompt(string? prompt) =>
         string.IsNullOrWhiteSpace(prompt) ? [] : prompt.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
-    private IActionResult BuildLoginInteractionResponse(
+    private async Task<IActionResult> BuildLoginInteractionResponse(
         bool redirectForPromptNone,
         string redirectUri,
         string? state,
@@ -258,7 +261,7 @@ public class AuthorizeController : ControllerBase
     {
         return redirectForPromptNone
             ? RedirectWithError(redirectUri, state, "login_required", detail)
-            : BuildInteractionRequiredResponse(StatusCodes.Status401Unauthorized, "login", client, requestId, requestedScopes, redirectUri, state, detail, loginHint, prompt, maxAge);
+            : await BuildInteractionRequiredResponse(StatusCodes.Status401Unauthorized, "login", client, requestId, requestedScopes, redirectUri, state, detail, loginHint, prompt, maxAge);
     }
 
     private static bool HasFreshAuthentication(DateTimeOffset? authenticationTime, int maxAgeSeconds)
@@ -327,7 +330,7 @@ public class AuthorizeController : ControllerBase
         return string.IsNullOrWhiteSpace(querySubjectId) ? null : querySubjectId;
     }
 
-    private ObjectResult BuildInteractionRequiredResponse(
+    private async Task<ObjectResult> BuildInteractionRequiredResponse(
         int statusCode,
         string interactionType,
         Client client,
@@ -340,6 +343,7 @@ public class AuthorizeController : ControllerBase
         string? prompt,
         int? maxAge)
     {
+        var scopeDetails = await _authorizationScopeMetadataService.DescribeScopesAsync(requestedScopes, requestedScopes);
         return StatusCode(statusCode, new AuthorizationInteractionResponse
         {
             Error = "interaction_required",
@@ -352,6 +356,7 @@ public class AuthorizeController : ControllerBase
             State = state,
             LoginHint = loginHint,
             RequestedScopes = requestedScopes.ToArray(),
+            RequestedScopeDetails = scopeDetails.ToArray(),
             RememberConsentAllowed = client.AllowRememberConsent && _options.AllowRememberConsent,
             Prompt = prompt,
             MaxAge = maxAge,
@@ -390,6 +395,8 @@ internal sealed class AuthorizationInteractionResponse
     public int? MaxAge { get; init; }
 
     public string? Prompt { get; init; }
+
+    public required AuthorizationScopeDescriptor[] RequestedScopeDetails { get; init; }
 
     public bool RememberConsentAllowed { get; init; }
 

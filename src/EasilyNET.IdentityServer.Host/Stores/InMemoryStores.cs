@@ -71,6 +71,20 @@ public class InMemoryClientStore : IClientStore
         });
         _clients.Add(new()
         {
+            ClientId = "restricted-github",
+            ClientName = "GitHub Restricted SPA",
+            ClientType = ClientType.Public,
+            Enabled = true,
+            AllowedGrantTypes = [GrantType.AuthorizationCode],
+            RedirectUris = ["http://localhost:3000/restricted-callback"],
+            AllowedScopes = ["openid", "profile", "api1"],
+            RequirePkce = true,
+            RequireClientSecret = false,
+            RequireConsent = false,
+            IdentityProviderRestrictions = ["github"]
+        });
+        _clients.Add(new()
+        {
             ClientId = "device",
             ClientName = "Device Client",
             ClientType = ClientType.Public,

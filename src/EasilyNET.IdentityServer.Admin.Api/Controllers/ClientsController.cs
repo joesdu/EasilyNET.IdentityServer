@@ -19,6 +19,7 @@ public class ClientsController(IdentityServerDbContext db) : ControllerBase
                               .Include(c => c.AllowedScopes)
                               .Include(c => c.RedirectUris)
                               .Include(c => c.AllowedCorsOrigins)
+                              .Include(c => c.IdentityProviderRestrictions)
                               .Select(c => new
                               {
                                   c.Id,
@@ -40,7 +41,8 @@ public class ClientsController(IdentityServerDbContext db) : ControllerBase
                                   AllowedGrantTypes = c.AllowedGrantTypes.Select(g => g.GrantType),
                                   AllowedScopes = c.AllowedScopes.Select(s => s.Scope),
                                   RedirectUris = c.RedirectUris.Select(r => r.RedirectUri),
-                                  AllowedCorsOrigins = c.AllowedCorsOrigins.Select(o => o.Origin)
+                                  AllowedCorsOrigins = c.AllowedCorsOrigins.Select(o => o.Origin),
+                                  IdentityProviderRestrictions = c.IdentityProviderRestrictions.Select(r => r.IdentityProvider)
                               })
                               .ToListAsync(ct);
         return Ok(clients);
@@ -52,13 +54,37 @@ public class ClientsController(IdentityServerDbContext db) : ControllerBase
         var client = await db.Clients
                              .Include(c => c.AllowedGrantTypes).Include(c => c.AllowedScopes)
                              .Include(c => c.RedirectUris).Include(c => c.ClientSecrets)
-                             .Include(c => c.Claims).Include(c => c.AllowedCorsOrigins).Include(c => c.Properties)
+                             .Include(c => c.Claims).Include(c => c.AllowedCorsOrigins).Include(c => c.IdentityProviderRestrictions).Include(c => c.Properties)
                              .FirstOrDefaultAsync(c => c.Id == id, ct);
         if (client == null)
         {
             return NotFound();
         }
-        return Ok(client);
+        return Ok(new
+        {
+            client.Id,
+            client.ClientId,
+            client.ClientName,
+            client.Description,
+            client.Enabled,
+            client.ClientType,
+            client.RequirePkce,
+            client.RequireClientSecret,
+            client.RequireConsent,
+            client.AllowPlainTextPkce,
+            client.AllowRememberConsent,
+            client.DeviceCodeLifetime,
+            client.ClientUri,
+            client.LogoUri,
+            client.AccessTokenLifetime,
+            client.RefreshTokenLifetime,
+            client.AuthorizationCodeLifetime,
+            AllowedGrantTypes = client.AllowedGrantTypes.Select(g => g.GrantType),
+            AllowedScopes = client.AllowedScopes.Select(s => s.Scope),
+            RedirectUris = client.RedirectUris.Select(r => r.RedirectUri),
+            AllowedCorsOrigins = client.AllowedCorsOrigins.Select(o => o.Origin),
+            IdentityProviderRestrictions = client.IdentityProviderRestrictions.Select(r => r.IdentityProvider)
+        });
     }
 
     [HttpPost]
@@ -92,6 +118,7 @@ public class ClientsController(IdentityServerDbContext db) : ControllerBase
             AllowedScopes = request.AllowedScopes.Select(s => new ClientScopeEntity { Scope = s }).ToList(),
             RedirectUris = request.RedirectUris.Select(r => new ClientRedirectUriEntity { RedirectUri = r }).ToList(),
             AllowedCorsOrigins = request.AllowedCorsOrigins.Select(o => new ClientCorsOriginEntity { Origin = o }).ToList(),
+            IdentityProviderRestrictions = request.IdentityProviderRestrictions.Select(idp => new ClientIdentityProviderRestrictionEntity { IdentityProvider = idp }).ToList(),
             ClientSecrets = BuildSecretEntities(request.ClientSecrets)
         };
         db.Clients.Add(entity);
@@ -105,7 +132,7 @@ public class ClientsController(IdentityServerDbContext db) : ControllerBase
         var entity = await db.Clients
                              .Include(c => c.AllowedGrantTypes).Include(c => c.AllowedScopes)
                              .Include(c => c.RedirectUris).Include(c => c.ClientSecrets)
-                             .Include(c => c.AllowedCorsOrigins)
+                             .Include(c => c.AllowedCorsOrigins).Include(c => c.IdentityProviderRestrictions)
                              .FirstOrDefaultAsync(c => c.Id == id, ct);
         if (entity == null)
         {
@@ -144,6 +171,8 @@ public class ClientsController(IdentityServerDbContext db) : ControllerBase
         entity.RedirectUris.AddRange(request.RedirectUris.Select(r => new ClientRedirectUriEntity { RedirectUri = r }));
         entity.AllowedCorsOrigins.Clear();
         entity.AllowedCorsOrigins.AddRange(request.AllowedCorsOrigins.Select(o => new ClientCorsOriginEntity { Origin = o }));
+        entity.IdentityProviderRestrictions.Clear();
+        entity.IdentityProviderRestrictions.AddRange(request.IdentityProviderRestrictions.Select(idp => new ClientIdentityProviderRestrictionEntity { IdentityProvider = idp }));
         if (request.ClientSecrets.Count > 0)
         {
             entity.ClientSecrets.Clear();
@@ -174,12 +203,12 @@ public class ClientsController(IdentityServerDbContext db) : ControllerBase
         }
 
         return await ValidateClientConfigurationAsync(request.ClientId, request.ClientType, request.RequireClientSecret, request.AllowedGrantTypes,
-            request.AllowedScopes, request.RedirectUris, request.AllowedCorsOrigins, request.ClientSecrets, ct);
+            request.AllowedScopes, request.RedirectUris, request.AllowedCorsOrigins, request.IdentityProviderRestrictions, request.ClientSecrets, ct);
     }
 
     private Task<ObjectResult?> ValidateUpdateRequestAsync(ClientEntity entity, UpdateClientRequest request, CancellationToken ct) =>
         ValidateClientConfigurationAsync(entity.ClientId, request.ClientType, request.RequireClientSecret, request.AllowedGrantTypes,
-            request.AllowedScopes, request.RedirectUris, request.AllowedCorsOrigins, request.ClientSecrets, ct);
+            request.AllowedScopes, request.RedirectUris, request.AllowedCorsOrigins, request.IdentityProviderRestrictions, request.ClientSecrets, ct);
 
     private async Task<ObjectResult?> ValidateClientConfigurationAsync(
         string clientId,
@@ -189,6 +218,7 @@ public class ClientsController(IdentityServerDbContext db) : ControllerBase
         IEnumerable<string> allowedScopes,
         IEnumerable<string> redirectUris,
         IEnumerable<string> allowedCorsOrigins,
+        IEnumerable<string> identityProviderRestrictions,
         IEnumerable<SecretInput> clientSecrets,
         CancellationToken ct)
     {
@@ -196,6 +226,7 @@ public class ClientsController(IdentityServerDbContext db) : ControllerBase
         var normalizedScopes = allowedScopes.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.Ordinal).ToArray();
         var normalizedRedirectUris = redirectUris.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.Ordinal).ToArray();
         var normalizedCorsOrigins = allowedCorsOrigins.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.Ordinal).ToArray();
+        var normalizedIdentityProviderRestrictions = identityProviderRestrictions.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.Ordinal).ToArray();
         var clientTypeValue = Enum.IsDefined(typeof(EasilyNET.IdentityServer.Abstractions.Models.ClientType), clientType)
             ? (EasilyNET.IdentityServer.Abstractions.Models.ClientType)clientType
             : (EasilyNET.IdentityServer.Abstractions.Models.ClientType?)null;
@@ -240,6 +271,14 @@ public class ClientsController(IdentityServerDbContext db) : ControllerBase
             if (!IsValidCorsOrigin(corsOrigin))
             {
                 return ValidationProblem("allowed_cors_origins", $"CORS origin '{corsOrigin}' is invalid.");
+            }
+        }
+
+        foreach (var identityProvider in normalizedIdentityProviderRestrictions)
+        {
+            if (identityProvider.Any(char.IsWhiteSpace))
+            {
+                return ValidationProblem("identity_provider_restrictions", $"Identity provider '{identityProvider}' must not contain whitespace.");
             }
         }
 
@@ -326,6 +365,8 @@ public class CreateClientRequest
 
     public List<string> AllowedGrantTypes { get; set; } = [];
 
+    public List<string> IdentityProviderRestrictions { get; set; } = [];
+
     public List<string> AllowedCorsOrigins { get; set; } = [];
 
     public List<string> AllowedScopes { get; set; } = [];
@@ -370,6 +411,8 @@ public class UpdateClientRequest
     public bool AllowRememberConsent { get; set; } = true;
 
     public List<string> AllowedGrantTypes { get; set; } = [];
+
+    public List<string> IdentityProviderRestrictions { get; set; } = [];
 
     public List<string> AllowedCorsOrigins { get; set; } = [];
 

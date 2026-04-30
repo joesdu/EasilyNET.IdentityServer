@@ -25,6 +25,7 @@ export interface Client {
   allowedScopes: string[];
   redirectUris: string[];
   allowedCorsOrigins?: string[];
+  identityProviderRestrictions?: string[];
   claims?: { type: string; value: string }[];
   properties?: { key: string; value: string }[];
   clientUri?: string;
@@ -54,6 +55,7 @@ export interface CreateClientRequest {
   allowedScopes: string[];
   redirectUris: string[];
   allowedCorsOrigins?: string[];
+  identityProviderRestrictions?: string[];
   clientUri?: string;
   logoUri?: string;
   clientSecrets?: SecretInput[];

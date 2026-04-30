@@ -19,6 +19,7 @@ public class EfClientStore(IdentityServerDbContext db) : IClientStore
                              .Include(c => c.ClientSecrets)
                              .Include(c => c.Claims)
                              .Include(c => c.AllowedCorsOrigins)
+                             .Include(c => c.IdentityProviderRestrictions)
                              .Include(c => c.Properties)
                              .FirstOrDefaultAsync(c => c.ClientId == clientId, cancellationToken);
         return entity == null ? null : MapToModel(entity);
@@ -33,6 +34,7 @@ public class EfClientStore(IdentityServerDbContext db) : IClientStore
                                .Include(c => c.ClientSecrets)
                                .Include(c => c.Claims)
                                .Include(c => c.AllowedCorsOrigins)
+                               .Include(c => c.IdentityProviderRestrictions)
                                .Include(c => c.Properties)
                                .Where(c => c.Enabled)
                                .ToListAsync(cancellationToken);
@@ -53,6 +55,7 @@ public class EfClientStore(IdentityServerDbContext db) : IClientStore
             ClientSecrets = e.ClientSecrets.Select(s => new Secret { Value = s.Value, Description = s.Description, Expiration = s.Expiration, Type = s.Type }).ToList(),
             Claims = e.Claims.Select(c => new ClientClaim { Type = c.Type, Value = c.Value }).ToList(),
             AllowedCorsOrigins = e.AllowedCorsOrigins.Select(o => o.Origin).ToList(),
+            IdentityProviderRestrictions = e.IdentityProviderRestrictions.Select(r => r.IdentityProvider).ToList(),
             RequirePkce = e.RequirePkce,
             AllowPlainTextPkce = e.AllowPlainTextPkce,
             RequireClientSecret = e.RequireClientSecret,

@@ -576,6 +576,11 @@ public class IdentityServerTests
         Assert.AreEqual("consent", consentInteraction.GetProperty("interactionType").GetString());
         Assert.AreEqual("alice", consentInteraction.GetProperty("subjectId").GetString());
         Assert.AreEqual("alice", consentInteraction.GetProperty("selectedAccount").GetProperty("subjectId").GetString());
+        var requestedScopeDetails = consentInteraction.GetProperty("requestedScopeDetails").EnumerateArray().ToArray();
+        Assert.AreEqual(3, requestedScopeDetails.Length);
+        Assert.IsTrue(requestedScopeDetails.Any(scope => scope.GetProperty("name").GetString() == "openid" && scope.GetProperty("required").GetBoolean() && scope.GetProperty("type").GetString() == "identity"));
+        Assert.IsTrue(requestedScopeDetails.Any(scope => scope.GetProperty("name").GetString() == "profile" && scope.GetProperty("emphasize").GetBoolean()));
+        Assert.IsTrue(requestedScopeDetails.Any(scope => scope.GetProperty("name").GetString() == "api1" && scope.GetProperty("displayName").GetString() == "API 1 Access" && scope.GetProperty("type").GetString() == "api"));
 
         var contextResponse = await _client.GetAsync($"/connect/authorize/context/{requestId}");
         contextResponse.EnsureSuccessStatusCode();
@@ -583,6 +588,7 @@ public class IdentityServerTests
         Assert.AreEqual("alice", contextJson.RootElement.GetProperty("subjectId").GetString());
         Assert.AreEqual("alice", contextJson.RootElement.GetProperty("selectedAccount").GetProperty("subjectId").GetString());
         CollectionAssert.AreEquivalent(new[] { "openid", "profile", "api1" }, contextJson.RootElement.GetProperty("pendingConsentScopes").EnumerateArray().Select(x => x.GetString()!).ToArray());
+        Assert.AreEqual(3, contextJson.RootElement.GetProperty("requestedScopeDetails").GetArrayLength());
 
         var consentResponse = await _client.SendAsync(PostJson("/connect/authorize/interaction", new
         {
@@ -603,6 +609,30 @@ public class IdentityServerTests
 
         var expiredContextResponse = await _client.GetAsync($"/connect/authorize/context/{requestId}");
         Assert.AreEqual(HttpStatusCode.NotFound, expiredContextResponse.StatusCode);
+    }
+
+    /// <summary>
+    /// Test identity provider restrictions filter account candidates in interaction context
+    /// </summary>
+    [TestMethod]
+    public async Task AuthorizationInteraction_IdentityProviderRestrictions_FilterAccountCandidates()
+    {
+        var verifier = CreateCodeVerifier();
+        var challenge = CreateCodeChallenge(verifier);
+        var response = await _client.GetAsync($"/connect/authorize?response_type=code&client_id=restricted-github&redirect_uri={Uri.EscapeDataString("http://localhost:3000/restricted-callback")}&scope=openid%20profile%20api1&prompt=select_account&code_challenge={challenge}&code_challenge_method=S256");
+
+        Assert.AreEqual(HttpStatusCode.Conflict, response.StatusCode);
+        var interactionJson = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+        var contextEndpoint = interactionJson.RootElement.GetProperty("contextEndpoint").GetString();
+
+        var contextResponse = await _client.GetAsync(contextEndpoint!);
+        contextResponse.EnsureSuccessStatusCode();
+        var contextJson = await JsonDocument.ParseAsync(await contextResponse.Content.ReadAsStreamAsync());
+        var availableAccounts = contextJson.RootElement.GetProperty("availableAccounts").EnumerateArray().ToArray();
+
+        Assert.AreEqual(1, availableAccounts.Length);
+        Assert.AreEqual("github-alice", availableAccounts[0].GetProperty("subjectId").GetString());
+        Assert.AreEqual("github", availableAccounts[0].GetProperty("identityProvider").GetString());
     }
 
     /// <summary>

@@ -69,6 +69,7 @@ export default function ClientsPage() {
           allowedScopes: fullClient.allowedScopes || [],
           redirectUris: fullClient.redirectUris || [],
           allowedCorsOrigins: fullClient.allowedCorsOrigins || [],
+          identityProviderRestrictions: fullClient.identityProviderRestrictions || [],
           clientSecret: undefined,
         });
       }
@@ -100,6 +101,7 @@ export default function ClientsPage() {
         allowedScopes: values.allowedScopes || [],
         redirectUris: values.redirectUris || [],
         allowedCorsOrigins: values.allowedCorsOrigins || [],
+        identityProviderRestrictions: values.identityProviderRestrictions || [],
         clientUri: values.clientUri,
         logoUri: values.logoUri,
         clientSecrets: values.clientSecret ? [{ value: values.clientSecret }] : [],
@@ -272,6 +274,9 @@ export default function ClientsPage() {
             </Form.Item>
             <Form.Item name="allowedScopes" label="允许的作用域">
               <Select mode="multiple" options={scopeOptions} placeholder="选择允许的作用域" />
+            </Form.Item>
+            <Form.Item name="identityProviderRestrictions" label="Identity Provider 限制" extra="可选。填写后仅允许这些外部/本地身份提供方参与登录与账号选择。">
+              <Select mode="tags" placeholder="例如：local、github、azuread" />
             </Form.Item>
           </Card>
 

@@ -41,6 +41,8 @@ public class ClientEntity
 
     public int Id { get; set; }
 
+    public List<ClientIdentityProviderRestrictionEntity> IdentityProviderRestrictions { get; set; } = [];
+
     public string? LogoUri { get; set; }
 
     public List<ClientPropertyEntity> Properties { get; set; } = [];
@@ -132,6 +134,17 @@ public class ClientCorsOriginEntity
     public int Id { get; set; }
 
     public required string Origin { get; set; }
+}
+
+public class ClientIdentityProviderRestrictionEntity
+{
+    public ClientEntity Client { get; set; } = null!;
+
+    public int ClientId { get; set; }
+
+    public int Id { get; set; }
+
+    public required string IdentityProvider { get; set; }
 }
 
 public class ClientPropertyEntity

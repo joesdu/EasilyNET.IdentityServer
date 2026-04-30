@@ -32,6 +32,8 @@ public class IdentityServerDbContext(DbContextOptions<IdentityServerDbContext> o
 
     public DbSet<ClientGrantTypeEntity> ClientGrantTypes => Set<ClientGrantTypeEntity>();
 
+    public DbSet<ClientIdentityProviderRestrictionEntity> ClientIdentityProviderRestrictions => Set<ClientIdentityProviderRestrictionEntity>();
+
     public DbSet<ClientPropertyEntity> ClientProperties => Set<ClientPropertyEntity>();
 
     public DbSet<ClientRedirectUriEntity> ClientRedirectUris => Set<ClientRedirectUriEntity>();
@@ -69,6 +71,7 @@ public class IdentityServerDbContext(DbContextOptions<IdentityServerDbContext> o
             b.HasMany(x => x.ClientSecrets).WithOne(x => x.Client).HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.Claims).WithOne(x => x.Client).HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.AllowedCorsOrigins).WithOne(x => x.Client).HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Cascade);
+            b.HasMany(x => x.IdentityProviderRestrictions).WithOne(x => x.Client).HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.Properties).WithOne(x => x.Client).HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Cascade);
         });
 

@@ -11,6 +11,7 @@ namespace EasilyNET.IdentityServer.Host.Controllers;
 public class AuthorizationInteractionController(
     IAuthorizationRequestContextService authorizationRequestContextService,
     IAuthorizationAccountService authorizationAccountService,
+    IAuthorizationScopeMetadataService authorizationScopeMetadataService,
     IAuthorizationService authorizationService,
     IdentityServerOptions options) : ControllerBase
 {
@@ -29,6 +30,7 @@ public class AuthorizationInteractionController(
         }
 
         var availableAccounts = await GetAvailableAccountsAsync(context, cancellationToken);
+        var scopeDetails = await GetScopeDetailsAsync(context, cancellationToken);
 
         return Ok(new AuthorizationRequestContextResponse
         {
@@ -43,6 +45,7 @@ public class AuthorizationInteractionController(
             LoginHint = context.LoginHint,
             MaxAge = context.MaxAge,
             RequestedScopes = context.RequestedScopes,
+            RequestedScopeDetails = scopeDetails,
             PendingConsentScopes = context.PendingConsentScopes.Length == 0 ? context.RequestedScopes : context.PendingConsentScopes,
             RequiresConsent = context.RequiresConsent,
             RememberConsentAllowed = context.RememberConsentAllowed,
@@ -148,7 +151,7 @@ public class AuthorizationInteractionController(
         if (context.RequiresConsent && !string.Equals(command.Action, "consent", StringComparison.OrdinalIgnoreCase))
         {
             var availableAccounts = await GetAvailableAccountsAsync(context, cancellationToken);
-            return Ok(BuildInteractionRequiredResponse(context, "consent", "User consent is required", availableAccounts));
+            return Ok(await BuildInteractionRequiredResponseAsync(context, "consent", "User consent is required", availableAccounts, cancellationToken));
         }
 
         var approval = await authorizationService.ApproveAuthorizationRequestAsync(new()
@@ -186,11 +189,15 @@ public class AuthorizationInteractionController(
         string.Equals(action, "select_account", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(action, "consent", StringComparison.OrdinalIgnoreCase);
 
-    private AuthorizationInteractionResult BuildInteractionRequiredResponse(
+    private async Task<AuthorizationInteractionResult> BuildInteractionRequiredResponseAsync(
         AuthorizationRequestContext context,
         string interactionType,
         string detail,
-        IReadOnlyCollection<AuthorizationAccountCandidate> availableAccounts) =>
+        IReadOnlyCollection<AuthorizationAccountCandidate> availableAccounts,
+        CancellationToken cancellationToken)
+    {
+        var scopeDetails = await GetScopeDetailsAsync(context, cancellationToken);
+        return
         new()
         {
             Outcome = "interaction_required",
@@ -206,6 +213,7 @@ public class AuthorizationInteractionController(
                 State = context.State,
                 LoginHint = context.LoginHint,
                 RequestedScopes = context.RequestedScopes,
+                RequestedScopeDetails = scopeDetails,
                 RememberConsentAllowed = context.RememberConsentAllowed,
                 Prompt = context.Prompt,
                 MaxAge = context.MaxAge,
@@ -223,6 +231,7 @@ public class AuthorizationInteractionController(
                 }
             }
         };
+    }
 
     private async Task<AuthorizationAccountCandidate[]> GetAvailableAccountsAsync(AuthorizationRequestContext context, CancellationToken cancellationToken)
     {
@@ -277,6 +286,13 @@ public class AuthorizationInteractionController(
             SubjectDisplayName = selectedAccount.DisplayName,
             SubjectIdentityProvider = selectedAccount.IdentityProvider
         };
+
+    private async Task<AuthorizationScopeDescriptor[]> GetScopeDetailsAsync(AuthorizationRequestContext context, CancellationToken cancellationToken)
+    {
+        var selectedScopes = context.PendingConsentScopes.Length == 0 ? context.RequestedScopes : context.PendingConsentScopes;
+        var descriptors = await authorizationScopeMetadataService.DescribeScopesAsync(context.RequestedScopes, selectedScopes, cancellationToken);
+        return descriptors.ToArray();
+    }
 
     private string BuildSuccessRedirectUrl(string redirectUri, string code, string? state)
     {
@@ -348,6 +364,8 @@ public class AuthorizationRequestContextResponse
 
     public string[] PendingConsentScopes { get; set; } = [];
 
+    public AuthorizationScopeDescriptor[] RequestedScopeDetails { get; set; } = [];
+
     public string? Prompt { get; set; }
 
     public bool RememberConsentAllowed { get; set; }
@@ -409,6 +427,8 @@ public class AuthorizationInteractionResponsePayload
     public required string RequestId { get; set; }
 
     public required string[] RequestedScopes { get; set; }
+
+    public AuthorizationScopeDescriptor[] RequestedScopeDetails { get; set; } = [];
 
     public AuthorizationAccountCandidate? SelectedAccount { get; set; }
 
