@@ -40,7 +40,8 @@ public class DiscoveryController : ControllerBase
         var tokenEndpointAuthMethods = new HashSet<string>(StringComparer.Ordinal)
         {
             "client_secret_basic",
-            "client_secret_post"
+            "client_secret_post",
+            "private_key_jwt"  // RFC 7523: Private Key JWT authentication
         };
         if (_options.EnablePrivateKeyJwtClientAuthentication)
         {

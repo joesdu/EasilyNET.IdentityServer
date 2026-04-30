@@ -58,6 +58,11 @@ public class ClientAuthenticationRequest
     /// 重定向 URI (Token 请求时)
     /// </summary>
     public string? RedirectUri { get; init; }
+
+    /// <summary>
+    /// Token 端点 URL (用于验证 JWT 断言的 aud 声明)
+    /// </summary>
+    public string? TokenEndpoint { get; init; }
 }
 
 /// <summary>
