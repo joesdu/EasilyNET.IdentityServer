@@ -73,7 +73,7 @@ The repository also includes:
 
 The host application exposes the following public endpoints in the current implementation:
 
-| Endpoint                                              | Purpose                                                      |
+| Endpoint                                              | Purpose                                                      | Other                   |
 | ----------------------------------------------------- | ------------------------------------------------------------ | ----------------------- |
 | `GET /.well-known/openid-configuration`               | Discovery metadata                                           |
 | `GET /.well-known/jwks`                               | JSON Web Key Set                                             |
