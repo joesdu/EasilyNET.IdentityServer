@@ -24,27 +24,41 @@ public class ResourceController : ControllerBase
     public async Task<IActionResult> VerifyToken(CancellationToken cancellationToken)
     {
         var authHeader = Request.Headers.Authorization.ToString();
+        var headerToken = !string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
+            ? authHeader["Bearer ".Length..].Trim()
+            : null;
+
+        string? formToken = null;
+        if (Request.HasFormContentType)
+        {
+            var form = await Request.ReadFormAsync(cancellationToken);
+            formToken = form.TryGetValue("access_token", out var postedToken) && !string.IsNullOrWhiteSpace(postedToken.ToString())
+                ? postedToken.ToString()
+                : null;
+        }
+
+        var queryToken = Request.Query["access_token"].ToString();
+        var suppliedCount = CountSuppliedTokenMethods(headerToken, formToken, queryToken);
+        if (suppliedCount > 1)
+        {
+            return BadRequestWithWwwAuthenticate("invalid_request", "Access token must be transmitted using exactly one method", "Bearer");
+        }
+
+        if (!string.IsNullOrWhiteSpace(queryToken))
+        {
+            return BadRequestWithWwwAuthenticate("invalid_request", "Access token must not be transmitted in the URI query string", "Bearer");
+        }
 
         // RFC 6750 Section 2.1: Bearer Token in Authorization Header
-        if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        if (!string.IsNullOrWhiteSpace(headerToken))
         {
-            var token = authHeader["Bearer ".Length..].Trim();
-            return await ValidateTokenAsync(token, "Bearer", cancellationToken);
+            return await ValidateTokenAsync(headerToken, "Bearer", cancellationToken);
         }
 
         // RFC 6750 Section 2.2: Form-Encoded Body (不推荐)
-        var form = await Request.ReadFormAsync(cancellationToken);
-        if (form.TryGetValue("access_token", out var formToken) && !string.IsNullOrEmpty(formToken.ToString()))
+        if (!string.IsNullOrWhiteSpace(formToken))
         {
-            return await ValidateTokenAsync(formToken.ToString(), "Bearer", cancellationToken);
-        }
-
-        // RFC 6750 Section 2.3: URI Query Parameter (不推荐，仅在绝对必要时使用)
-        var queryToken = Request.Query["access_token"].ToString();
-        if (!string.IsNullOrEmpty(queryToken))
-        {
-            // URI 查询参数方式必须有 TLS，且资源服务器必须支持
-            return await ValidateTokenAsync(queryToken, "Bearer", cancellationToken);
+            return await ValidateTokenAsync(formToken, "Bearer", cancellationToken);
         }
 
         // 无令牌 - 返回 401 并包含 WWW-Authenticate 头
@@ -100,4 +114,18 @@ public class ResourceController : ControllerBase
             error_description = errorDescription
         });
     }
+
+    private IActionResult BadRequestWithWwwAuthenticate(string error, string errorDescription, string scheme)
+    {
+        var realm = "EasilyNET.IdentityServer";
+        Response.Headers.WWWAuthenticate = $"{scheme} realm=\"{realm}\", error=\"{error}\", error_description=\"{errorDescription}\"";
+        return BadRequest(new
+        {
+            error,
+            error_description = errorDescription
+        });
+    }
+
+    private static int CountSuppliedTokenMethods(params string?[] values) =>
+        values.Count(value => !string.IsNullOrWhiteSpace(value));
 }

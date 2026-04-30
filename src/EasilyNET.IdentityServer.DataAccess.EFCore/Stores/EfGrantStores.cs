@@ -57,6 +57,28 @@ public class EfPersistedGrantStore(IdentityServerDbContext db) : IPersistedGrant
         return entity == null ? null : MapToModel(entity);
     }
 
+    public async Task<PersistedGrant?> TryConsumeAsync(string key, string expectedType, string clientId, CancellationToken cancellationToken = default)
+    {
+        var entity = await db.PersistedGrants.FirstOrDefaultAsync(g => g.Key == key && g.Type == expectedType && g.ClientId == clientId, cancellationToken);
+        if (entity == null || entity.ConsumedTime.HasValue)
+        {
+            return null;
+        }
+
+        var original = MapToModel(entity);
+        entity.ConsumedTime = DateTime.UtcNow;
+
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+            return original;
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return null;
+        }
+    }
+
     public async Task<IEnumerable<PersistedGrant>> GetAllAsync(PersistedGrantFilter filter, CancellationToken cancellationToken = default)
     {
         var query = db.PersistedGrants.AsQueryable();
@@ -113,10 +135,16 @@ public class EfPersistedGrantStore(IdentityServerDbContext db) : IPersistedGrant
     private static PersistedGrant MapToModel(PersistedGrantEntity e) =>
         new()
         {
-            Key = e.Key, Type = e.Type, SubjectId = e.SubjectId, ClientId = e.ClientId,
-            SessionId = e.SessionId, Description = e.Description,
-            CreationTime = e.CreationTime, ExpirationTime = e.ExpirationTime,
-            ConsumedTime = e.ConsumedTime, Data = e.Data,
+            Key = e.Key,
+            Type = e.Type,
+            SubjectId = e.SubjectId,
+            ClientId = e.ClientId,
+            SessionId = e.SessionId,
+            Description = e.Description,
+            CreationTime = e.CreationTime,
+            ExpirationTime = e.ExpirationTime,
+            ConsumedTime = e.ConsumedTime,
+            Data = e.Data,
             Properties = string.IsNullOrEmpty(e.PropertiesJson)
                 ? new Dictionary<string, string>()
                 : JsonSerializer.Deserialize<Dictionary<string, string>>(e.PropertiesJson)
@@ -176,6 +204,22 @@ public class EfDeviceFlowStore(IdentityServerDbContext db) : IDeviceFlowStore
         return entity == null ? null : MapToModel(entity);
     }
 
+    public async Task<DeviceCodeData?> TryConsumeDeviceCodeAsync(string deviceCode, string clientId, CancellationToken cancellationToken = default)
+    {
+        var entity = await db.DeviceCodes.FirstOrDefaultAsync(d => d.DeviceCode == deviceCode && d.ClientId == clientId, cancellationToken);
+        if (entity == null || entity.Data == "consumed")
+        {
+            return null;
+        }
+
+        var original = MapToModel(entity);
+        var affectedRows = await db.DeviceCodes
+            .Where(d => d.DeviceCode == deviceCode && d.ClientId == clientId && d.Data != "consumed")
+            .ExecuteUpdateAsync(setters => setters.SetProperty(d => d.Data, "consumed"), cancellationToken);
+
+        return affectedRows == 1 ? original : null;
+    }
+
     public async Task ConsumeDeviceCodeAsync(string deviceCode, CancellationToken cancellationToken = default)
     {
         // 标记为已消费 (通过设置 Data = "consumed" 实现，与 InMemory 存储保持一致)
@@ -200,9 +244,14 @@ public class EfDeviceFlowStore(IdentityServerDbContext db) : IDeviceFlowStore
     private static DeviceCodeData MapToModel(DeviceCodeEntity e) =>
         new()
         {
-            Code = e.DeviceCode, UserCode = e.UserCode, SubjectId = e.SubjectId,
-            ClientId = e.ClientId, Description = e.Description,
-            CreationTime = e.CreationTime, ExpirationTime = e.ExpirationTime, Data = e.Data,
+            Code = e.DeviceCode,
+            UserCode = e.UserCode,
+            SubjectId = e.SubjectId,
+            ClientId = e.ClientId,
+            Description = e.Description,
+            CreationTime = e.CreationTime,
+            ExpirationTime = e.ExpirationTime,
+            Data = e.Data,
             Properties = string.IsNullOrEmpty(e.PropertiesJson)
                 ? new Dictionary<string, string>()
                 : JsonSerializer.Deserialize<Dictionary<string, string>>(e.PropertiesJson)
@@ -247,9 +296,11 @@ public class EfUserConsentStore(IdentityServerDbContext db) : IUserConsentStore
                    ? null
                    : new UserConsent
                    {
-                       SubjectId = entity.SubjectId, ClientId = entity.ClientId,
+                       SubjectId = entity.SubjectId,
+                       ClientId = entity.ClientId,
                        Scopes = entity.Scopes.Split(' ', StringSplitOptions.RemoveEmptyEntries),
-                       CreationTime = entity.CreationTime, ExpirationTime = entity.ExpirationTime
+                       CreationTime = entity.CreationTime,
+                       ExpirationTime = entity.ExpirationTime
                    };
     }
 

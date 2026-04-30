@@ -18,6 +18,11 @@ public interface IPersistedGrantStore
     Task<PersistedGrant?> GetAsync(string key, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// 尝试以原子方式消费授权/令牌，仅当记录尚未消费时成功。
+    /// </summary>
+    Task<PersistedGrant?> TryConsumeAsync(string key, string expectedType, string clientId, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// 获取所有匹配的授权
     /// </summary>
     Task<IEnumerable<PersistedGrant>> GetAllAsync(PersistedGrantFilter filter, CancellationToken cancellationToken = default);

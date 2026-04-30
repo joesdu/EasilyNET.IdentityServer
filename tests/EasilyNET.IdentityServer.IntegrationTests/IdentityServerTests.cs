@@ -357,6 +357,22 @@ public class IdentityServerTests
     }
 
     /// <summary>
+    /// Test authorization endpoint returns login interaction contract when user is not authenticated
+    /// </summary>
+    [TestMethod]
+    public async Task AuthorizationCode_WithoutAuthentication_ReturnsInteractionRequired()
+    {
+        var verifier = CreateCodeVerifier();
+        var challenge = CreateCodeChallenge(verifier);
+        var response = await _client.GetAsync($"/connect/authorize?response_type=code&client_id=spa&redirect_uri={Uri.EscapeDataString("http://localhost:3000/callback")}&scope=openid%20profile%20api1&code_challenge={challenge}&code_challenge_method=S256");
+
+        Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
+        var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+        Assert.AreEqual("interaction_required", json.RootElement.GetProperty("error").GetString());
+        Assert.AreEqual("login", json.RootElement.GetProperty("interactionType").GetString());
+    }
+
+    /// <summary>
     /// Test authorization code with wrong verifier returns invalid grant
     /// </summary>
     [TestMethod]
@@ -380,6 +396,63 @@ public class IdentityServerTests
         Assert.AreEqual(HttpStatusCode.BadRequest, tokenResponse.StatusCode);
         var body = await JsonDocument.ParseAsync(await tokenResponse.Content.ReadAsStreamAsync());
         Assert.AreEqual("invalid_grant", body.RootElement.GetProperty("error").GetString());
+    }
+
+    /// <summary>
+    /// Test authorization code replay revokes previously issued access and refresh tokens
+    /// </summary>
+    [TestMethod]
+    public async Task AuthorizationCode_Replay_RevokesPreviouslyIssuedTokens()
+    {
+        var verifier = CreateCodeVerifier();
+        var challenge = CreateCodeChallenge(verifier);
+        var authorizeResponse = await _client.GetAsync($"/connect/authorize?response_type=code&client_id=mvc&redirect_uri={Uri.EscapeDataString("https://localhost:5002/signin-oidc")}&scope=openid%20profile%20api1&state=replay&code_challenge={challenge}&code_challenge_method=S256&subject_id=test-user");
+        var query = System.Web.HttpUtility.ParseQueryString(GetAuthorizationResponseUri(authorizeResponse).Query);
+        var code = query["code"]!;
+
+        var firstExchangeResponse = await _client.SendAsync(PostForm("/connect/token", new()
+        {
+            ["grant_type"] = "authorization_code",
+            ["client_id"] = "mvc",
+            ["client_secret"] = "secret",
+            ["code"] = code,
+            ["redirect_uri"] = "https://localhost:5002/signin-oidc",
+            ["code_verifier"] = verifier
+        }));
+        firstExchangeResponse.EnsureSuccessStatusCode();
+        var firstTokenJson = await JsonDocument.ParseAsync(await firstExchangeResponse.Content.ReadAsStreamAsync());
+        var accessToken = firstTokenJson.RootElement.GetProperty("access_token").GetString()!;
+        var refreshToken = firstTokenJson.RootElement.GetProperty("refresh_token").GetString()!;
+
+        var replayResponse = await _client.SendAsync(PostForm("/connect/token", new()
+        {
+            ["grant_type"] = "authorization_code",
+            ["client_id"] = "mvc",
+            ["client_secret"] = "secret",
+            ["code"] = code,
+            ["redirect_uri"] = "https://localhost:5002/signin-oidc",
+            ["code_verifier"] = verifier
+        }));
+        Assert.AreEqual(HttpStatusCode.BadRequest, replayResponse.StatusCode);
+        var replayJson = await JsonDocument.ParseAsync(await replayResponse.Content.ReadAsStreamAsync());
+        Assert.AreEqual("invalid_grant", replayJson.RootElement.GetProperty("error").GetString());
+
+        var introspectResponse = await _client.SendAsync(PostForm("/connect/introspect", new()
+        {
+            ["token"] = accessToken
+        }, "console:secret"));
+        introspectResponse.EnsureSuccessStatusCode();
+        var introspectionJson = await JsonDocument.ParseAsync(await introspectResponse.Content.ReadAsStreamAsync());
+        Assert.IsFalse(introspectionJson.RootElement.GetProperty("active").GetBoolean());
+
+        var refreshResponse = await _client.SendAsync(PostForm("/connect/token", new()
+        {
+            ["grant_type"] = "refresh_token",
+            ["client_id"] = "mvc",
+            ["client_secret"] = "secret",
+            ["refresh_token"] = refreshToken
+        }));
+        Assert.AreEqual(HttpStatusCode.BadRequest, refreshResponse.StatusCode);
     }
 
     /// <summary>
@@ -610,6 +683,60 @@ public class IdentityServerTests
         introspectResponse.EnsureSuccessStatusCode();
         var introspection = await JsonDocument.ParseAsync(await introspectResponse.Content.ReadAsStreamAsync());
         Assert.IsFalse(introspection.RootElement.GetProperty("active").GetBoolean());
+    }
+
+    /// <summary>
+    /// Test resource verification rejects access token in URI query string
+    /// </summary>
+    [TestMethod]
+    public async Task VerifyToken_QueryAccessToken_ReturnsBadRequest()
+    {
+        var tokenResponse = await _client.SendAsync(PostForm("/connect/token", new()
+        {
+            ["grant_type"] = "client_credentials",
+            ["client_id"] = "console",
+            ["client_secret"] = "secret",
+            ["scope"] = "api1"
+        }));
+        tokenResponse.EnsureSuccessStatusCode();
+        var tokenJson = await JsonDocument.ParseAsync(await tokenResponse.Content.ReadAsStreamAsync());
+        var accessToken = tokenJson.RootElement.GetProperty("access_token").GetString()!;
+
+        var response = await _client.PostAsync($"/connect/verify?access_token={Uri.EscapeDataString(accessToken)}", new FormUrlEncodedContent([]));
+
+        Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
+        var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+        Assert.AreEqual("invalid_request", json.RootElement.GetProperty("error").GetString());
+    }
+
+    /// <summary>
+    /// Test resource verification rejects multiple token transmission methods
+    /// </summary>
+    [TestMethod]
+    public async Task VerifyToken_MultipleTransmissionMethods_ReturnsBadRequest()
+    {
+        var tokenResponse = await _client.SendAsync(PostForm("/connect/token", new()
+        {
+            ["grant_type"] = "client_credentials",
+            ["client_id"] = "console",
+            ["client_secret"] = "secret",
+            ["scope"] = "api1"
+        }));
+        tokenResponse.EnsureSuccessStatusCode();
+        var tokenJson = await JsonDocument.ParseAsync(await tokenResponse.Content.ReadAsStreamAsync());
+        var accessToken = tokenJson.RootElement.GetProperty("access_token").GetString()!;
+
+        var request = PostForm("/connect/verify", new()
+        {
+            ["access_token"] = accessToken
+        });
+        request.Headers.Authorization = new("Bearer", accessToken);
+
+        var response = await _client.SendAsync(request);
+
+        Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
+        var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+        Assert.AreEqual("invalid_request", json.RootElement.GetProperty("error").GetString());
     }
 
     #endregion

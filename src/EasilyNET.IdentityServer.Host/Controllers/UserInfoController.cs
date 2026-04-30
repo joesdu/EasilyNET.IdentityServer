@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using EasilyNET.IdentityServer.Abstractions.Services;
 using Microsoft.AspNetCore.Mvc;
 
@@ -51,25 +50,29 @@ public class UserInfoController : ControllerBase
             return Forbidden(new { error = "insufficient_scope", error_description = "Token does not include openid scope" });
         }
 
+        if (string.IsNullOrEmpty(validationResult.SubjectId))
+        {
+            return Unauthorized(new { error = "invalid_token", error_description = "Token does not contain a subject identifier" });
+        }
+
+        var subjectId = validationResult.SubjectId;
+
         // 构建 UserInfo 响应
         var claims = new Dictionary<string, object>();
 
         // sub (subject) - 必需
-        if (!string.IsNullOrEmpty(validationResult.SubjectId))
-        {
-            claims["sub"] = validationResult.SubjectId;
-        }
+        claims["sub"] = subjectId;
 
         // 根据 scope 返回相应的 claims
         if (validationResult.Scopes.Contains("profile"))
         {
             claims["name"] = "Test User"; // 实际应从用户存储获取
-            claims["preferred_username"] = validationResult.SubjectId;
+            claims["preferred_username"] = subjectId;
         }
 
         if (validationResult.Scopes.Contains("email"))
         {
-            claims["email"] = $"{validationResult.SubjectId}@example.com"; // 实际应从用户存储获取
+            claims["email"] = $"{subjectId}@example.com"; // 实际应从用户存储获取
             claims["email_verified"] = true;
         }
 
@@ -110,8 +113,8 @@ public class UserInfoController : ControllerBase
             return Request.Form["access_token"].FirstOrDefault();
         }
 
-        // 3. 尝试从查询参数提取
-        return Request.Query["access_token"].FirstOrDefault();
+        // 3. RFC 6750 / OAuth 2.1: 不接受 URI query 中的 access_token
+        return null;
     }
 
     private string? GetClientIpAddress()

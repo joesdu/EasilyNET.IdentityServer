@@ -44,13 +44,18 @@ export interface CreateClientRequest {
   requirePkce: boolean;
   requireClientSecret: boolean;
   requireConsent: boolean;
+  allowPlainTextPkce?: boolean;
+  allowRememberConsent?: boolean;
   accessTokenLifetime: number;
   refreshTokenLifetime: number;
   authorizationCodeLifetime?: number;
+  deviceCodeLifetime?: number;
   allowedGrantTypes: string[];
   allowedScopes: string[];
   redirectUris: string[];
   allowedCorsOrigins?: string[];
+  clientUri?: string;
+  logoUri?: string;
   clientSecrets?: SecretInput[];
 }
 

@@ -16,7 +16,10 @@ namespace EasilyNET.IdentityServer.Host.Controllers;
 [ApiController]
 public class TokenController : ControllerBase
 {
+    private const string AuthorizationCodeType = "authorization_code";
     private const string ConsumedRefreshTokenType = "consumed_refresh_token";
+    private const string IssuedAccessTokenProperty = "issued_access_token";
+    private const string IssuedRefreshTokenProperty = "issued_refresh_token";
     private const string RefreshTokenType = "refresh_token";
     private readonly IAuditService _auditService;
     private readonly IClientAuthenticationService _clientAuth;
@@ -79,11 +82,11 @@ public class TokenController : ControllerBase
         var client = authResult.Client!;
         var result = grantType switch
         {
-            GrantType.ClientCredentials                    => await HandleClientCredentials(client, form, cancellationToken),
-            GrantType.AuthorizationCode                    => await HandleAuthorizationCode(client, form, cancellationToken),
-            GrantType.RefreshToken                         => await HandleRefreshToken(client, form, cancellationToken),
+            GrantType.ClientCredentials => await HandleClientCredentials(client, form, cancellationToken),
+            GrantType.AuthorizationCode => await HandleAuthorizationCode(client, form, cancellationToken),
+            GrantType.RefreshToken => await HandleRefreshToken(client, form, cancellationToken),
             "urn:ietf:params:oauth:grant-type:device_code" => await HandleDeviceCode(client, form, cancellationToken),
-            _                                              => BadRequest(new TokenErrorResponse("unsupported_grant_type", $"Grant type '{grantType}' is not supported"))
+            _ => BadRequest(new TokenErrorResponse("unsupported_grant_type", $"Grant type '{grantType}' is not supported"))
         };
         return result;
     }
@@ -127,18 +130,9 @@ public class TokenController : ControllerBase
 
         // 查找授权码
         var grant = await _grantStore.GetAsync(code, ct);
-        if (grant == null || grant.Type != "authorization_code" || grant.ClientId != client.ClientId)
+        if (grant == null || grant.Type != AuthorizationCodeType || grant.ClientId != client.ClientId)
         {
             return BadRequest(new TokenErrorResponse("invalid_grant", "Invalid authorization code"));
-        }
-
-        // OAuth 2.1 要求：授权码只能使用一次 (RFC 6749 Section 4.1.2)
-        // 检查是否已消费或已过期 - 使用原子操作防止竞态条件
-        if (grant.ConsumedTime.HasValue)
-        {
-            // 已被消费 - 清除任何残留记录并拒绝
-            await _grantStore.RemoveAsync(code, ct);
-            return BadRequest(new TokenErrorResponse("invalid_grant", "Authorization code has already been used"));
         }
 
         // 检查过期
@@ -190,30 +184,20 @@ public class TokenController : ControllerBase
             }
         }
 
-        // 消费授权码 - 使用原子操作防止竞态条件
-        // 先标记为已消费，再删除
-        var consumedGrant = new PersistedGrant
+        if (grant.ConsumedTime.HasValue)
         {
-            Key = grant.Key,
-            Type = grant.Type,
-            SubjectId = grant.SubjectId,
-            ClientId = grant.ClientId,
-            SessionId = grant.SessionId,
-            Description = grant.Description,
-            CreationTime = grant.CreationTime,
-            ExpirationTime = grant.ExpirationTime,
-            ConsumedTime = DateTime.UtcNow,
-            Data = grant.Data,
-            Properties = grant.Properties
-        };
-        try
-        {
-            await _grantStore.StoreAsync(consumedGrant, ct);
-            await _grantStore.RemoveAsync(code, ct);
+            await RevokeTokensIssuedFromAuthorizationCodeAsync(grant, ct);
+            return BadRequest(new TokenErrorResponse("invalid_grant", "Authorization code has already been used"));
         }
-        catch (DbUpdateConcurrencyException)
+
+        var originalGrant = await _grantStore.TryConsumeAsync(code, AuthorizationCodeType, client.ClientId, ct);
+        if (originalGrant == null)
         {
-            // 并发冲突 - 授权码已被其他请求使用
+            var consumedGrant = await _grantStore.GetAsync(code, ct);
+            if (consumedGrant?.ConsumedTime.HasValue == true)
+            {
+                await RevokeTokensIssuedFromAuthorizationCodeAsync(consumedGrant, ct);
+            }
             _logger.LogWarning("Concurrency conflict detected for authorization code: {Code}", code);
             return BadRequest(new TokenErrorResponse("invalid_grant", "Authorization code has already been used"));
         }
@@ -231,6 +215,7 @@ public class TokenController : ControllerBase
             Nonce = nonce
         }, ct);
         await StoreRefreshTokenGrantAsync(client, grant.SubjectId, scopes, result, nonce, ct);
+        await PersistIssuedTokenReferencesAsync(originalGrant, result, ct);
 
         // 记录审计日志
         await _auditService.LogAuthorizationCodeExchangedAsync(client.ClientId, grant.SubjectId, GetClientIpAddress(), ct);
@@ -375,8 +360,12 @@ public class TokenController : ControllerBase
             return BadRequest(new TokenErrorResponse("authorization_pending", "The user has not yet authorized this device"));
         }
 
-        // User has authorized - consume the device code and issue tokens
-        await _deviceFlowStore.ConsumeDeviceCodeAsync(deviceCode, ct);
+        // User has authorized - 原子消费设备代码并签发令牌
+        var consumedDeviceCode = await _deviceFlowStore.TryConsumeDeviceCodeAsync(deviceCode, client.ClientId, ct);
+        if (consumedDeviceCode == null)
+        {
+            return BadRequest(new TokenErrorResponse("invalid_grant", "Device code has already been used"));
+        }
         var scopes = (deviceCodeData.Properties.TryGetValue("scope", out var scopeStr) ? scopeStr : null)?
                      .Split(' ', StringSplitOptions.RemoveEmptyEntries) ??
                      client.AllowedScopes.ToArray();
@@ -498,6 +487,34 @@ public class TokenController : ControllerBase
         }, ct);
     }
 
+    private async Task PersistIssuedTokenReferencesAsync(PersistedGrant originalGrant, TokenResult result, CancellationToken ct)
+    {
+        var updatedProperties = new Dictionary<string, string>(originalGrant.Properties)
+        {
+            [IssuedAccessTokenProperty] = result.AccessToken
+        };
+
+        if (!string.IsNullOrEmpty(result.RefreshToken))
+        {
+            updatedProperties[IssuedRefreshTokenProperty] = result.RefreshToken;
+        }
+
+        await _grantStore.StoreAsync(new PersistedGrant
+        {
+            Key = originalGrant.Key,
+            Type = originalGrant.Type,
+            SubjectId = originalGrant.SubjectId,
+            ClientId = originalGrant.ClientId,
+            SessionId = originalGrant.SessionId,
+            Description = originalGrant.Description,
+            CreationTime = originalGrant.CreationTime,
+            ExpirationTime = originalGrant.ExpirationTime,
+            ConsumedTime = DateTime.UtcNow,
+            Data = originalGrant.Data,
+            Properties = updatedProperties
+        }, ct);
+    }
+
     private async Task MarkRefreshTokenConsumedAsync(PersistedGrant grant, CancellationToken ct)
     {
         await _grantStore.StoreAsync(new()
@@ -514,6 +531,19 @@ public class TokenController : ControllerBase
             Data = grant.Data,
             Properties = grant.Properties
         }, ct);
+    }
+
+    private async Task RevokeTokensIssuedFromAuthorizationCodeAsync(PersistedGrant grant, CancellationToken ct)
+    {
+        if (grant.Properties.TryGetValue(IssuedRefreshTokenProperty, out var refreshToken) && !string.IsNullOrWhiteSpace(refreshToken))
+        {
+            await _grantStore.RemoveAsync(refreshToken, ct);
+        }
+
+        if (grant.Properties.TryGetValue(IssuedAccessTokenProperty, out var accessToken) && !string.IsNullOrWhiteSpace(accessToken))
+        {
+            await _tokenService.RevokeAsync(accessToken, ct);
+        }
     }
 
     private async Task RevokeRefreshTokenFamilyAsync(PersistedGrant reusedGrant, CancellationToken ct)

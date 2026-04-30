@@ -90,6 +90,21 @@ public class MongoPersistedGrantStore(IMongoDatabase database) : IPersistedGrant
         return entity;
     }
 
+    public async Task<PersistedGrant?> TryConsumeAsync(string key, string expectedType, string clientId, CancellationToken cancellationToken = default)
+    {
+        var filter = Builders<PersistedGrant>.Filter.Eq(g => g.Key, key) &
+                     Builders<PersistedGrant>.Filter.Eq(g => g.Type, expectedType) &
+                     Builders<PersistedGrant>.Filter.Eq(g => g.ClientId, clientId) &
+                     Builders<PersistedGrant>.Filter.Eq(g => g.ConsumedTime, null as DateTime?);
+        var update = Builders<PersistedGrant>.Update.Set(g => g.ConsumedTime, DateTime.UtcNow);
+
+        return await Collection.FindOneAndUpdateAsync(
+            filter,
+            update,
+            new FindOneAndUpdateOptions<PersistedGrant> { ReturnDocument = ReturnDocument.Before },
+            cancellationToken);
+    }
+
     public async Task<IEnumerable<PersistedGrant>> GetAllAsync(PersistedGrantFilter filter, CancellationToken cancellationToken = default)
     {
         var builder = Builders<PersistedGrant>.Filter;
@@ -163,6 +178,20 @@ public class MongoDeviceFlowStore(IMongoDatabase database) : IDeviceFlowStore
     public async Task<DeviceCodeData?> FindByUserCodeAsync(string userCode, CancellationToken cancellationToken = default)
     {
         return await Collection.Find(d => d.UserCode == userCode).FirstOrDefaultAsync(cancellationToken);
+    }
+
+    public async Task<DeviceCodeData?> TryConsumeDeviceCodeAsync(string deviceCode, string clientId, CancellationToken cancellationToken = default)
+    {
+        var filter = Builders<DeviceCodeData>.Filter.Eq(d => d.Code, deviceCode) &
+                     Builders<DeviceCodeData>.Filter.Eq(d => d.ClientId, clientId) &
+                     Builders<DeviceCodeData>.Filter.Ne(d => d.Data, "consumed");
+        var update = Builders<DeviceCodeData>.Update.Set(d => d.Data, "consumed");
+
+        return await Collection.FindOneAndUpdateAsync(
+            filter,
+            update,
+            new FindOneAndUpdateOptions<DeviceCodeData> { ReturnDocument = ReturnDocument.Before },
+            cancellationToken);
     }
 
     public async Task ConsumeDeviceCodeAsync(string deviceCode, CancellationToken cancellationToken = default)

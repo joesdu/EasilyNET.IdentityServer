@@ -20,7 +20,8 @@ public class SigningKey
     /// </summary>
     public DateTime? DisabledAt { get; init; }
 
-    /// <n IPS 公钥（用于 JWKS）
+    /// <summary>
+    /// RSA 指数（用于 JWKS）
     /// </summary>
     public string? Exponent { get; init; }
 

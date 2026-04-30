@@ -3,6 +3,7 @@ using EasilyNET.IdentityServer.Abstractions.Models;
 using EasilyNET.IdentityServer.Abstractions.Services;
 using EasilyNET.IdentityServer.Abstractions.Stores;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 
 namespace EasilyNET.IdentityServer.Host.Controllers;
 
@@ -114,20 +115,16 @@ public class AuthorizeController : ControllerBase
             requestedScopes = client.AllowedScopes.ToList();
         }
 
+        var prompts = SplitPrompt(prompt);
+
         // 处理 prompt 参数 (OIDC)
-        var subjectId = Request.Headers["X-Subject-Id"].ToString();
-        if (string.IsNullOrEmpty(subjectId))
-        {
-            subjectId = Request.Query["subject_id"].ToString();
-        }
+        var subjectId = ResolveSubjectId();
 
         // 根据 prompt 参数处理
-        if (!string.IsNullOrEmpty(prompt))
+        if (prompts.Length > 0)
         {
-            var promptsArray = prompt.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-
             // prompt=none: 不能显示登录或consent页面
-            if (promptsArray.Contains("none"))
+            if (prompts.Contains("none", StringComparer.Ordinal))
             {
                 if (string.IsNullOrEmpty(subjectId))
                 {
@@ -138,7 +135,7 @@ public class AuthorizeController : ControllerBase
             }
 
             // prompt=login: 强制重新认证
-            if (promptsArray.Contains("login"))
+            if (prompts.Contains("login", StringComparer.Ordinal))
             {
                 // 强制重新登录 - 清除现有 subjectId
                 subjectId = string.Empty;
@@ -148,22 +145,36 @@ public class AuthorizeController : ControllerBase
         // 检查用户是否已登录
         if (string.IsNullOrEmpty(subjectId))
         {
-            // 返回需要登录的提示
-            return RedirectWithError(redirect_uri, state, "login_required", "User authentication is required");
+            return BuildInteractionRequiredResponse(StatusCodes.Status401Unauthorized, "login", client, validation.RequestId!, requestedScopes, redirect_uri, state,
+                "User authentication is required", login_hint);
         }
 
         // 检查是否需要 consent (prompt=consent 强制要求)
-        var prompts = SplitPrompt(prompt);
         var forceConsent = prompts.Contains("consent", StringComparer.Ordinal);
         var consentAccepted = string.Equals(Request.Query["consent"], "accept", StringComparison.OrdinalIgnoreCase);
+        var consentRejected = string.Equals(Request.Query["consent"], "deny", StringComparison.OrdinalIgnoreCase);
+        if (consentRejected)
+        {
+            return RedirectWithError(redirect_uri, state, "access_denied", "The resource owner denied the consent request");
+        }
+
         var existingConsent = _consentStore == null ? null : await _consentStore.GetAsync(subjectId, client.ClientId, cancellationToken);
         var existingScopes = existingConsent?.Scopes.ToHashSet(StringComparer.Ordinal) ?? [];
         var hasExistingConsent = existingConsent != null && requestedScopes.All(existingScopes.Contains);
-        var needsConsent = forceConsent || (client.RequireConsent && !hasExistingConsent);
-        if (needsConsent && !consentAccepted)
+        var needsConsent = forceConsent || (validation.NeedsConsent && !hasExistingConsent);
+        if (needsConsent && prompts.Contains("none", StringComparer.Ordinal))
         {
             return RedirectWithError(redirect_uri, state, "consent_required", "User consent is required");
         }
+
+        if (needsConsent && !consentAccepted)
+        {
+            return BuildInteractionRequiredResponse(StatusCodes.Status403Forbidden, "consent", client, validation.RequestId!, requestedScopes, redirect_uri, state,
+                "User consent is required", login_hint);
+        }
+
+        var rememberConsentRequested = string.Equals(Request.Query["remember_consent"], "true", StringComparison.OrdinalIgnoreCase) ||
+                                     string.Equals(Request.Query["remember_consent"], "on", StringComparison.OrdinalIgnoreCase);
 
         var approval = await _authorizationService.ApproveAuthorizationRequestAsync(new()
         {
@@ -175,7 +186,7 @@ public class AuthorizeController : ControllerBase
             Nonce = nonce,
             CodeChallenge = code_challenge,
             CodeChallengeMethod = code_challenge_method,
-            RememberConsent = consentAccepted && client.AllowRememberConsent
+            RememberConsent = consentAccepted && rememberConsentRequested && client.AllowRememberConsent && _options.AllowRememberConsent
         }, cancellationToken);
         if (!approval.IsSuccess || string.IsNullOrEmpty(approval.AuthorizationCode))
         {
@@ -215,4 +226,74 @@ public class AuthorizeController : ControllerBase
 
     private static string[] SplitPrompt(string? prompt) =>
         string.IsNullOrWhiteSpace(prompt) ? [] : prompt.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+    private string? ResolveSubjectId()
+    {
+        var principalSubjectId = User.FindFirstValue("sub") ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!string.IsNullOrWhiteSpace(principalSubjectId))
+        {
+            return principalSubjectId;
+        }
+
+        var headerSubjectId = Request.Headers["X-Subject-Id"].ToString();
+        if (!string.IsNullOrWhiteSpace(headerSubjectId))
+        {
+            return headerSubjectId;
+        }
+
+        var querySubjectId = Request.Query["subject_id"].ToString();
+        return string.IsNullOrWhiteSpace(querySubjectId) ? null : querySubjectId;
+    }
+
+    private ObjectResult BuildInteractionRequiredResponse(
+        int statusCode,
+        string interactionType,
+        Client client,
+        string requestId,
+        IEnumerable<string> requestedScopes,
+        string redirectUri,
+        string? state,
+        string detail,
+        string? loginHint)
+    {
+        return StatusCode(statusCode, new AuthorizationInteractionResponse
+        {
+            Error = "interaction_required",
+            ErrorDescription = detail,
+            InteractionType = interactionType,
+            RequestId = requestId,
+            ClientId = client.ClientId,
+            ClientName = client.ClientName,
+            RedirectUri = redirectUri,
+            State = state,
+            LoginHint = loginHint,
+            RequestedScopes = requestedScopes.ToArray(),
+            RememberConsentAllowed = client.AllowRememberConsent && _options.AllowRememberConsent
+        });
+    }
+}
+
+internal sealed class AuthorizationInteractionResponse
+{
+    public required string ClientId { get; init; }
+
+    public string? ClientName { get; init; }
+
+    public required string Error { get; init; }
+
+    public required string ErrorDescription { get; init; }
+
+    public required string InteractionType { get; init; }
+
+    public string? LoginHint { get; init; }
+
+    public bool RememberConsentAllowed { get; init; }
+
+    public required string RedirectUri { get; init; }
+
+    public required string RequestId { get; init; }
+
+    public required string[] RequestedScopes { get; init; }
+
+    public string? State { get; init; }
 }

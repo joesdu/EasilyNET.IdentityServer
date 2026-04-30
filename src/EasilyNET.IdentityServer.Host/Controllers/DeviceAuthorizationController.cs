@@ -134,8 +134,7 @@ public class DeviceAuthorizationController : ControllerBase
             Properties = deviceCode.Properties
         };
 
-        // Remove old and store authorized version
-        await _deviceFlowStore.RemoveAsync(deviceCode.Code, ct);
+        // 通过 upsert 语义原地更新，避免先删后插带来的竞态窗口
         await _deviceFlowStore.StoreAsync(authorized, ct);
         return Ok(new { message = "Device authorized successfully" });
     }

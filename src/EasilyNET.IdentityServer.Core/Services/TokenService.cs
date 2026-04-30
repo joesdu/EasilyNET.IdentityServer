@@ -434,8 +434,7 @@ public class DefaultSigningService : ISigningService
         {
             // 使用RSA进行签名,支持JWKS公开
             _cachedRsa = RSA.Create(2048);
-            var parameters = _cachedRsa.ExportParameters(false);
-            _cachedKey = new RsaSecurityKey(parameters)
+            _cachedKey = new RsaSecurityKey(_cachedRsa)
             {
                 KeyId = "rsa-key-1"
             };
@@ -454,6 +453,7 @@ public class DefaultSigningService : ISigningService
     /// 获取RSA公钥用于JWKS暴露
     /// </summary>
     public RSA? GetPublicKey() => _cachedRsa;
+
 
     /// <summary>
     /// 获取所有有效签名密钥（用于 JWKS）

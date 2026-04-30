@@ -23,6 +23,11 @@ public interface IDeviceFlowStore
     Task<DeviceCodeData?> FindByUserCodeAsync(string userCode, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// 尝试以原子方式消费设备代码，仅当其尚未被消费时成功。
+    /// </summary>
+    Task<DeviceCodeData?> TryConsumeDeviceCodeAsync(string deviceCode, string clientId, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// 消费者代码
     /// </summary>
     Task ConsumeDeviceCodeAsync(string deviceCode, CancellationToken cancellationToken = default);

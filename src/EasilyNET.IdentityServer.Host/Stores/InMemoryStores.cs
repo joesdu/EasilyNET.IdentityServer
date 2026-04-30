@@ -52,7 +52,8 @@ public class InMemoryClientStore : IClientStore
             RedirectUris = ["http://localhost:3000/callback"],
             AllowedScopes = ["openid", "profile", "api1"],
             RequirePkce = true,
-            RequireClientSecret = false
+            RequireClientSecret = false,
+            RequireConsent = false
         });
         _clients.Add(new()
         {
@@ -192,12 +193,35 @@ public class InMemoryPersistedGrantStore : IPersistedGrantStore
         lock (_lock)
         {
             _grants.TryGetValue(key, out var grant);
-            // 授权码只能消费一次；刷新令牌重放检测需要能读取已消费标记。
-            if (grant is { Type: GrantType.AuthorizationCode } && grant.ConsumedTime.HasValue)
+            return Task.FromResult(grant);
+        }
+    }
+
+    public Task<PersistedGrant?> TryConsumeAsync(string key, string expectedType, string clientId, CancellationToken cancellationToken = default)
+    {
+        lock (_lock)
+        {
+            if (!_grants.TryGetValue(key, out var grant) || grant.Type != expectedType || grant.ClientId != clientId || grant.ConsumedTime.HasValue)
             {
                 return Task.FromResult<PersistedGrant?>(null);
             }
-            return Task.FromResult(grant);
+
+            _grants[key] = new PersistedGrant
+            {
+                Key = grant.Key,
+                Type = grant.Type,
+                SubjectId = grant.SubjectId,
+                ClientId = grant.ClientId,
+                SessionId = grant.SessionId,
+                Description = grant.Description,
+                CreationTime = grant.CreationTime,
+                ExpirationTime = grant.ExpirationTime,
+                ConsumedTime = DateTime.UtcNow,
+                Data = grant.Data,
+                Properties = new Dictionary<string, string>(grant.Properties)
+            };
+
+            return Task.FromResult<PersistedGrant?>(grant);
         }
     }
 
@@ -306,6 +330,7 @@ public class InMemoryDeviceFlowStore : IDeviceFlowStore
 {
     private readonly ConcurrentDictionary<string, DeviceCodeData> _deviceCodes = new();
     private readonly ConcurrentDictionary<string, string> _userCodeIndex = new(); // userCode -> deviceCode
+    private readonly object _lock = new();
 
     public Task StoreAsync(DeviceCodeData deviceCode, CancellationToken cancellationToken = default)
     {
@@ -328,6 +353,32 @@ public class InMemoryDeviceFlowStore : IDeviceFlowStore
             return Task.FromResult(data);
         }
         return Task.FromResult<DeviceCodeData?>(null);
+    }
+
+    public Task<DeviceCodeData?> TryConsumeDeviceCodeAsync(string deviceCode, string clientId, CancellationToken cancellationToken = default)
+    {
+        lock (_lock)
+        {
+            if (!_deviceCodes.TryGetValue(deviceCode, out var existing) || existing.ClientId != clientId || existing.Data == "consumed")
+            {
+                return Task.FromResult<DeviceCodeData?>(null);
+            }
+
+            _deviceCodes[deviceCode] = new DeviceCodeData
+            {
+                Code = existing.Code,
+                UserCode = existing.UserCode,
+                SubjectId = existing.SubjectId,
+                ClientId = existing.ClientId,
+                Description = existing.Description,
+                CreationTime = existing.CreationTime,
+                ExpirationTime = existing.ExpirationTime,
+                Data = "consumed",
+                Properties = existing.Properties
+            };
+
+            return Task.FromResult<DeviceCodeData?>(existing);
+        }
     }
 
     public Task ConsumeDeviceCodeAsync(string deviceCode, CancellationToken cancellationToken = default)
