@@ -73,8 +73,8 @@
 
 当前实现中，Host 暴露的主要端点如下：
 
-| 端点                                                  | 用途                               | 其他                    |
-| ----------------------------------------------------- | ---------------------------------- | ----------------------- |
+| 端点                                                  | 用途                               |
+| ----------------------------------------------------- | ---------------------------------- |
 | `GET /.well-known/openid-configuration`               | Discovery 元数据                   |
 | `GET /.well-known/jwks`                               | JSON Web Key Set                   |
 | `GET /connect/authorize`                              | 授权端点                           |
@@ -82,7 +82,8 @@
 | `GET /connect/authorize/interaction/page/{requestId}` | 稳定交互入口，重定向到前端交互页面 |
 | `POST /connect/authorize/interaction`                 | 继续执行登录 / 选账号 / 同意交互   |
 | `POST /connect/token`                                 | Token 端点                         |
-| `GET                                                  | POST /connect/userinfo`            | OpenID Connect UserInfo |
+| `GET /connect/userinfo`                               | OpenID Connect UserInfo            |
+| `POST /connect/userinfo`                              | OpenID Connect UserInfo            |
 | `POST /connect/introspect`                            | Token 内省                         |
 | `POST /connect/revocation`                            | Token 撤销                         |
 | `POST /connect/register`                              | 动态客户端注册                     |

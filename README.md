@@ -73,8 +73,8 @@ The repository also includes:
 
 The host application exposes the following public endpoints in the current implementation:
 
-| Endpoint                                              | Purpose                                                      | Other                   |
-| ----------------------------------------------------- | ------------------------------------------------------------ | ----------------------- |
+| Endpoint                                              | Purpose                                                      |
+| ----------------------------------------------------- | ------------------------------------------------------------ |
 | `GET /.well-known/openid-configuration`               | Discovery metadata                                           |
 | `GET /.well-known/jwks`                               | JSON Web Key Set                                             |
 | `GET /connect/authorize`                              | Authorization endpoint                                       |
@@ -82,7 +82,8 @@ The host application exposes the following public endpoints in the current imple
 | `GET /connect/authorize/interaction/page/{requestId}` | Stable entry point that redirects to the UI interaction page |
 | `POST /connect/authorize/interaction`                 | Continue login / account selection / consent interactions    |
 | `POST /connect/token`                                 | Token endpoint                                               |
-| `GET                                                  | POST /connect/userinfo`                                      | OpenID Connect UserInfo |
+| `GET /connect/userinfo`                               | OpenID Connect UserInfo                                      |
+| `POST /connect/userinfo`                              | OpenID Connect UserInfo                                      |
 | `POST /connect/introspect`                            | Token introspection                                          |
 | `POST /connect/revocation`                            | Token revocation                                             |
 | `POST /connect/register`                              | Dynamic client registration                                  |
