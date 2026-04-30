@@ -88,9 +88,34 @@ public class IdentityServerOptions
     public bool EnableAbsoluteRefreshTokenLifetime { get; set; } = true;
 
     /// <summary>
+    /// 启用 DPoP
+    /// </summary>
+    public bool EnableDpop { get; set; } = true;
+
+    /// <summary>
+    /// 启用动态客户端注册
+    /// </summary>
+    public bool EnableDynamicClientRegistration { get; set; } = true;
+
+    /// <summary>
+    /// 启用 mTLS 客户端认证
+    /// </summary>
+    public bool EnableMutualTlsClientAuthentication { get; set; } = true;
+
+    /// <summary>
+    /// 启用 private_key_jwt 客户端认证
+    /// </summary>
+    public bool EnablePrivateKeyJwtClientAuthentication { get; set; } = true;
+
+    /// <summary>
     /// 颁发者名称
     /// </summary>
     public string Issuer { get; set; } = "https://identityserver.example.com";
+
+    /// <summary>
+    /// 动态客户端注册初始访问令牌
+    /// </summary>
+    public string? DynamicClientRegistrationInitialAccessToken { get; set; }
 
     /// <summary>
     /// 对外暴露的授权交互入口路径（同域稳定入口）
@@ -108,6 +133,16 @@ public class IdentityServerOptions
     public ICollection<string> AllowedAccessTokenSigningAlgorithms { get; set; } = new[] { "RS256", "RS384", "RS512" };
 
     /// <summary>
+    /// 允许的客户端断言签名算法
+    /// </summary>
+    public ICollection<string> AllowedClientAssertionSigningAlgorithms { get; set; } = new[] { "RS256", "RS384", "RS512" };
+
+    /// <summary>
+    /// 允许的 DPoP 签名算法
+    /// </summary>
+    public ICollection<string> AllowedDpopSigningAlgorithms { get; set; } = new[] { "RS256", "RS384", "RS512" };
+
+    /// <summary>
     /// 允许的 Identity Token 签名算法
     /// </summary>
     public ICollection<string> AllowedIdentityTokenSigningAlgorithms { get; set; } = new[] { "RS256", "RS384", "RS512" };
@@ -116,6 +151,16 @@ public class IdentityServerOptions
     /// 刷新令牌生命周期（秒）
     /// </summary>
     public int RefreshTokenLifetime { get; set; } = 86400;
+
+    /// <summary>
+    /// DPoP 证明允许的最大年龄（秒）
+    /// </summary>
+    public int DpopProofLifetimeSeconds { get; set; } = 300;
+
+    /// <summary>
+    /// 动态客户端注册是否要求初始访问令牌
+    /// </summary>
+    public bool RequireInitialAccessTokenForDynamicClientRegistration { get; set; }
 
     /// <summary>
     /// 是否需要Consent

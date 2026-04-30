@@ -42,11 +42,20 @@ public class DiscoveryController : ControllerBase
             "client_secret_basic",
             "client_secret_post"
         };
+        if (_options.EnablePrivateKeyJwtClientAuthentication)
+        {
+            tokenEndpointAuthMethods.Add("private_key_jwt");
+        }
+        if (_options.EnableMutualTlsClientAuthentication)
+        {
+            tokenEndpointAuthMethods.Add("tls_client_auth");
+            tokenEndpointAuthMethods.Add("self_signed_tls_client_auth");
+        }
         if (clients.Any(x => x.ClientType == ClientType.Public || !x.RequireClientSecret))
         {
             tokenEndpointAuthMethods.Add("none");
         }
-var scopeNames = scopes.Select(s => s.Name)
+        var scopeNames = scopes.Select(s => s.Name)
                               .Concat(identityResources.Select(r => r.Name))
                               .Distinct()
                               .ToList();
@@ -76,13 +85,14 @@ var scopeNames = scopes.Select(s => s.Name)
             ["device_authorization_endpoint"] = $"{issuer}/connect/device_authorization",
             ["introspection_endpoint"] = $"{issuer}/connect/introspect",
             ["revocation_endpoint"] = $"{issuer}/connect/revocation",
+            ["registration_endpoint"] = $"{issuer}/connect/register",
             ["jwks_uri"] = $"{issuer}/.well-known/jwks",
             ["scopes_supported"] = scopeNames,
             ["response_types_supported"] = new[] { "code" },
             ["response_modes_supported"] = new[] { "query", "fragment", "form_post" },
             ["grant_types_supported"] = new[] { "authorization_code", "client_credentials", "refresh_token", "urn:ietf:params:oauth:grant-type:device_code" },
             ["token_endpoint_auth_methods_supported"] = tokenEndpointAuthMethods.ToArray(),
-            ["token_endpoint_auth_signing_alg_values_supported"] = new[] { "RS256", "RS384", "RS512" },
+            ["token_endpoint_auth_signing_alg_values_supported"] = _options.AllowedClientAssertionSigningAlgorithms.ToArray(),
             ["subject_types_supported"] = new[] { "public" },
             ["id_token_signing_alg_values_supported"] = new[] { "RS256", "RS384", "RS512" },
             ["code_challenge_methods_supported"] = new[] { "S256" },
@@ -95,8 +105,12 @@ var scopeNames = scopes.Select(s => s.Name)
             ["frontchannel_logout_session_supported"] = true,
             ["end_session_endpoint"] = $"{issuer}/connect/logout",
             ["service_documentation"] = "https://docs.example.com",
-            ["dpop_signing_alg_values_supported"] = new[] { "RS256", "RS384", "RS512" }
+            ["dpop_signing_alg_values_supported"] = _options.EnableDpop ? _options.AllowedDpopSigningAlgorithms.ToArray() : Array.Empty<string>()
         };
+        if (!_options.EnableDynamicClientRegistration)
+        {
+            discovery.Remove("registration_endpoint");
+        }
         return Ok(discovery);
     }
 

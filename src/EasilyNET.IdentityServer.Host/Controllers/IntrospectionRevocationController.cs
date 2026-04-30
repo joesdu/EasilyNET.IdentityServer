@@ -2,6 +2,7 @@ using System.Text;
 using EasilyNET.IdentityServer.Abstractions.Models;
 using EasilyNET.IdentityServer.Abstractions.Services;
 using EasilyNET.IdentityServer.Abstractions.Stores;
+using EasilyNET.IdentityServer.Host.Infrastructure;
 using Microsoft.AspNetCore.Mvc;
 
 namespace EasilyNET.IdentityServer.Host.Controllers;
@@ -41,7 +42,7 @@ public class IntrospectionController : ControllerBase
         {
             return Ok(new { active = false });
         }
-        var result = await _tokenService.ValidateAccessTokenAsync(token, cancellationToken);
+        var result = await _tokenService.ValidateAccessTokenAsync(token, cancellationToken: cancellationToken);
         if (!result.IsValid)
         {
             return Ok(new { active = false });
@@ -70,7 +71,9 @@ public class IntrospectionController : ControllerBase
 
     private Task<ClientAuthenticationResult> AuthenticateClientAsync(IFormCollection form, CancellationToken cancellationToken)
     {
-        var (clientId, clientSecret) = ExtractClientCredentials(form);
+        var clientId = OAuthRequestHelpers.ResolveClientId(form);
+        var (resolvedClientId, clientSecret) = OAuthRequestHelpers.ExtractClientCredentials(Request, form);
+        clientId ??= resolvedClientId;
         if (string.IsNullOrEmpty(clientId))
         {
             return Task.FromResult(new ClientAuthenticationResult { IsSuccess = false });
@@ -78,25 +81,13 @@ public class IntrospectionController : ControllerBase
         return _clientAuthenticationService.AuthenticateClientAsync(new()
         {
             ClientId = clientId,
+            ClientAssertion = form["client_assertion"].ToString(),
+            ClientAssertionType = form["client_assertion_type"].ToString(),
+            ClientCertificate = OAuthRequestHelpers.GetClientCertificate(HttpContext),
             ClientSecret = clientSecret,
-            GrantType = GrantType.ClientCredentials
+            GrantType = GrantType.ClientCredentials,
+            RequestedEndpoint = OAuthRequestHelpers.BuildAbsoluteEndpointUri(Request)
         }, cancellationToken);
-    }
-
-    private (string? clientId, string? clientSecret) ExtractClientCredentials(IFormCollection form)
-    {
-        var authHeader = Request.Headers.Authorization.ToString();
-        if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
-        {
-            var encoded = authHeader["Basic ".Length..].Trim();
-            var decoded = Encoding.UTF8.GetString(Convert.FromBase64String(encoded));
-            var parts = decoded.Split(':', 2);
-            if (parts.Length == 2)
-            {
-                return (Uri.UnescapeDataString(parts[0]), Uri.UnescapeDataString(parts[1]));
-            }
-        }
-        return (form["client_id"].ToString(), form["client_secret"].ToString());
     }
 }
 
@@ -160,7 +151,9 @@ public class RevocationController : ControllerBase
 
     private Task<ClientAuthenticationResult> AuthenticateClientAsync(IFormCollection form, CancellationToken cancellationToken)
     {
-        var (clientId, clientSecret) = ExtractClientCredentials(form);
+        var clientId = OAuthRequestHelpers.ResolveClientId(form);
+        var (resolvedClientId, clientSecret) = OAuthRequestHelpers.ExtractClientCredentials(Request, form);
+        clientId ??= resolvedClientId;
         if (string.IsNullOrEmpty(clientId))
         {
             return Task.FromResult(new ClientAuthenticationResult { IsSuccess = false });
@@ -168,24 +161,12 @@ public class RevocationController : ControllerBase
         return _clientAuthenticationService.AuthenticateClientAsync(new()
         {
             ClientId = clientId,
+            ClientAssertion = form["client_assertion"].ToString(),
+            ClientAssertionType = form["client_assertion_type"].ToString(),
+            ClientCertificate = OAuthRequestHelpers.GetClientCertificate(HttpContext),
             ClientSecret = clientSecret,
-            GrantType = GrantType.ClientCredentials
+            GrantType = GrantType.ClientCredentials,
+            RequestedEndpoint = OAuthRequestHelpers.BuildAbsoluteEndpointUri(Request)
         }, cancellationToken);
-    }
-
-    private (string? clientId, string? clientSecret) ExtractClientCredentials(IFormCollection form)
-    {
-        var authHeader = Request.Headers.Authorization.ToString();
-        if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
-        {
-            var encoded = authHeader["Basic ".Length..].Trim();
-            var decoded = Encoding.UTF8.GetString(Convert.FromBase64String(encoded));
-            var parts = decoded.Split(':', 2);
-            if (parts.Length == 2)
-            {
-                return (Uri.UnescapeDataString(parts[0]), Uri.UnescapeDataString(parts[1]));
-            }
-        }
-        return (form["client_id"].ToString(), form["client_secret"].ToString());
     }
 }

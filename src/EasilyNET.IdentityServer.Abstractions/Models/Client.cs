@@ -6,6 +6,11 @@ namespace EasilyNET.IdentityServer.Abstractions.Models;
 public class Client
 {
     /// <summary>
+    /// 联系人
+    /// </summary>
+    public IEnumerable<string> Contacts { get; init; } = [];
+
+    /// <summary>
     /// 访问令牌生命周期（秒）
     /// </summary>
     public int AccessTokenLifetime { get; init; } = 3600;
@@ -86,6 +91,16 @@ public class Client
     public string? ClientUri { get; init; }
 
     /// <summary>
+    /// JWK Set（JSON 文本）
+    /// </summary>
+    public string? Jwks { get; init; }
+
+    /// <summary>
+    /// JWK Set URI
+    /// </summary>
+    public string? JwksUri { get; init; }
+
+    /// <summary>
     /// 描述
     /// </summary>
     public string? Description { get; init; }
@@ -126,9 +141,19 @@ public class Client
     public string? LogoUri { get; init; }
 
     /// <summary>
+    /// Policy URI
+    /// </summary>
+    public string? PolicyUri { get; init; }
+
+    /// <summary>
     /// 额外的属性
     /// </summary>
     public IDictionary<string, string> Properties { get; init; } = new Dictionary<string, string>();
+
+    /// <summary>
+    /// 是否要求 DPoP 证明
+    /// </summary>
+    public bool RequireDpopProof { get; init; }
 
     /// <summary>
     /// 允许的重定向 URI
@@ -146,6 +171,11 @@ public class Client
     public bool RequireClientSecret { get; init; } = true;
 
     /// <summary>
+    /// token 端点认证方法
+    /// </summary>
+    public string TokenEndpointAuthMethod { get; init; } = "client_secret_basic";
+
+    /// <summary>
     /// 是否需要Consent
     /// </summary>
     public bool RequireConsent { get; init; } = true;
@@ -159,6 +189,21 @@ public class Client
     /// 用户代码类型
     /// </summary>
     public string? UserCodeType { get; init; }
+
+    /// <summary>
+    /// TLS 客户端认证证书主题 DN
+    /// </summary>
+    public string? TlsClientAuthSubjectDn { get; init; }
+
+    /// <summary>
+    /// TLS 客户端认证证书指纹
+    /// </summary>
+    public string? TlsClientAuthThumbprint { get; init; }
+
+    /// <summary>
+    /// 服务条款 URI
+    /// </summary>
+    public string? TosUri { get; init; }
 }
 
 /// <summary>

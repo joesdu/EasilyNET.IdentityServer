@@ -10,6 +10,13 @@ namespace EasilyNET.IdentityServer.DataAccess.EFCore.Stores;
 /// </summary>
 public class EfClientStore(IdentityServerDbContext db) : IClientStore
 {
+    public async Task CreateClientAsync(Client client, CancellationToken cancellationToken = default)
+    {
+        var entity = MapToEntity(client);
+        db.Clients.Add(entity);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task<Client?> FindClientByIdAsync(string clientId, CancellationToken cancellationToken = default)
     {
         var entity = await db.Clients
@@ -48,6 +55,7 @@ public class EfClientStore(IdentityServerDbContext db) : IClientStore
         {
             ClientId = e.ClientId,
             ClientName = e.ClientName,
+            Contacts = Split(e.Contacts),
             Description = e.Description,
             Enabled = e.Enabled,
             ClientType = (ClientType)e.ClientType,
@@ -69,7 +77,71 @@ public class EfClientStore(IdentityServerDbContext db) : IClientStore
             AuthorizationCodeLifetime = e.AuthorizationCodeLifetime,
             DeviceCodeLifetime = e.DeviceCodeLifetime,
             ClientUri = e.ClientUri,
+            Jwks = e.Jwks,
+            JwksUri = e.JwksUri,
             LogoUri = e.LogoUri,
+            PolicyUri = e.PolicyUri,
+            RequireDpopProof = e.RequireDpopProof,
+            TokenEndpointAuthMethod = e.TokenEndpointAuthMethod,
+            TlsClientAuthSubjectDn = e.TlsClientAuthSubjectDn,
+            TlsClientAuthThumbprint = e.TlsClientAuthThumbprint,
+            TosUri = e.TosUri,
             Properties = e.Properties.ToDictionary(p => p.Key, p => p.Value)
         };
+
+    private static ClientEntity MapToEntity(Client client) =>
+        new()
+        {
+            ClientId = client.ClientId,
+            ClientName = client.ClientName,
+            Contacts = Join(client.Contacts),
+            Description = client.Description,
+            Enabled = client.Enabled,
+            ClientType = (int)client.ClientType,
+            AllowedGrantTypes = client.AllowedGrantTypes.Select(grantType => new ClientGrantTypeEntity { GrantType = grantType }).ToList(),
+            AuthorizationPromptTypes = client.AuthorizationPromptTypes.Select(promptType => new ClientAuthorizationPromptTypeEntity { PromptType = promptType }).ToList(),
+            RedirectUris = client.RedirectUris.Select(uri => new ClientRedirectUriEntity { RedirectUri = uri }).ToList(),
+            AllowedScopes = client.AllowedScopes.Select(scope => new ClientScopeEntity { Scope = scope }).ToList(),
+            ClientSecrets = client.ClientSecrets.Select(secret => new ClientSecretEntity
+            {
+                Value = secret.Value,
+                Description = secret.Description,
+                Expiration = secret.Expiration,
+                Type = secret.Type
+            }).ToList(),
+            Claims = client.Claims.Select(claim => new ClientClaimEntity { Type = claim.Type, Value = claim.Value }).ToList(),
+            AllowedCorsOrigins = client.AllowedCorsOrigins.Select(origin => new ClientCorsOriginEntity { Origin = origin }).ToList(),
+            IdentityProviderRestrictions = client.IdentityProviderRestrictions.Select(restriction => new ClientIdentityProviderRestrictionEntity { IdentityProvider = restriction }).ToList(),
+            RequirePkce = client.RequirePkce,
+            AllowPlainTextPkce = client.AllowPlainTextPkce,
+            RequireClientSecret = client.RequireClientSecret,
+            RequireConsent = client.RequireConsent,
+            AllowRememberConsent = client.AllowRememberConsent,
+            AccessTokenLifetime = client.AccessTokenLifetime,
+            RefreshTokenLifetime = client.RefreshTokenLifetime,
+            AuthorizationCodeLifetime = client.AuthorizationCodeLifetime,
+            DeviceCodeLifetime = client.DeviceCodeLifetime,
+            ClientUri = client.ClientUri,
+            Jwks = client.Jwks,
+            JwksUri = client.JwksUri,
+            LogoUri = client.LogoUri,
+            PolicyUri = client.PolicyUri,
+            RequireDpopProof = client.RequireDpopProof,
+            TokenEndpointAuthMethod = client.TokenEndpointAuthMethod,
+            TlsClientAuthSubjectDn = client.TlsClientAuthSubjectDn,
+            TlsClientAuthThumbprint = client.TlsClientAuthThumbprint,
+            TosUri = client.TosUri,
+            Properties = client.Properties.Select(property => new ClientPropertyEntity { Key = property.Key, Value = property.Value }).ToList()
+        };
+
+    private static IEnumerable<string> Split(string? value) =>
+        string.IsNullOrWhiteSpace(value)
+            ? []
+            : value.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    private static string? Join(IEnumerable<string> values)
+    {
+        var entries = values.Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.Ordinal).ToArray();
+        return entries.Length == 0 ? null : string.Join(';', entries);
+    }
 }

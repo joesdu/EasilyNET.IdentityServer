@@ -11,6 +11,11 @@ public class MongoClientStore(IMongoDatabase database) : IClientStore
 {
     private IMongoCollection<Client> Collection => database.GetCollection<Client>("clients");
 
+    public Task CreateClientAsync(Client client, CancellationToken cancellationToken = default)
+    {
+        return Collection.InsertOneAsync(client, cancellationToken: cancellationToken);
+    }
+
     public async Task<Client?> FindClientByIdAsync(string clientId, CancellationToken cancellationToken = default)
     {
         return await Collection.Find(c => c.ClientId == clientId).FirstOrDefaultAsync(cancellationToken);

@@ -4,6 +4,7 @@ using EasilyNET.IdentityServer.Abstractions.Extensions;
 using EasilyNET.IdentityServer.Abstractions.Models;
 using EasilyNET.IdentityServer.Abstractions.Services;
 using EasilyNET.IdentityServer.Abstractions.Stores;
+using EasilyNET.IdentityServer.Host.Infrastructure;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 
@@ -22,6 +23,7 @@ public class TokenController : ControllerBase
     private const string RefreshTokenType = "refresh_token";
     private readonly IAuditService _auditService;
     private readonly IClientAuthenticationService _clientAuth;
+    private readonly IDPoPService _dpopService;
     private readonly IDeviceFlowStore _deviceFlowStore;
     private readonly ILogger<TokenController> _logger;
     private readonly IPersistedGrantStore _grantStore;
@@ -30,6 +32,7 @@ public class TokenController : ControllerBase
 
     public TokenController(
         IClientAuthenticationService clientAuth,
+        IDPoPService dpopService,
         ITokenService tokenService,
         IPersistedGrantStore grantStore,
         IDeviceFlowStore deviceFlowStore,
@@ -38,6 +41,7 @@ public class TokenController : ControllerBase
         IAuditService auditService)
     {
         _clientAuth = clientAuth;
+        _dpopService = dpopService;
         _tokenService = tokenService;
         _grantStore = grantStore;
         _deviceFlowStore = deviceFlowStore;
@@ -61,36 +65,71 @@ public class TokenController : ControllerBase
         }
 
         // 提取客户端凭据 (支持 Basic Auth 和 POST body)
-        var (clientId, clientSecret) = ExtractClientCredentials(form);
+        var clientId = OAuthRequestHelpers.ResolveClientId(form);
+        var (resolvedClientId, clientSecret) = OAuthRequestHelpers.ExtractClientCredentials(Request, form);
+        clientId ??= resolvedClientId;
         if (string.IsNullOrEmpty(clientId))
         {
             return BadRequest(new TokenErrorResponse("invalid_client", "client_id is required"));
         }
+
+        var endpoint = OAuthRequestHelpers.BuildAbsoluteEndpointUri(Request);
 
         // 认证客户端
         var authResult = await _clientAuth.AuthenticateClientAsync(new()
         {
             ClientId = clientId,
             ClientSecret = clientSecret,
-            GrantType = grantType
+            ClientAssertion = form["client_assertion"].ToString(),
+            ClientAssertionType = form["client_assertion_type"].ToString(),
+            ClientCertificate = OAuthRequestHelpers.GetClientCertificate(HttpContext),
+            GrantType = grantType,
+            RedirectUri = form["redirect_uri"].ToString(),
+            RequestedEndpoint = endpoint
         }, cancellationToken);
         if (!authResult.IsSuccess)
         {
             return Unauthorized(new TokenErrorResponse(authResult.Error ?? "invalid_client", authResult.ErrorDescription));
         }
         var client = authResult.Client!;
+        string? dpopJkt = null;
+        var dpopProof = Request.Headers["DPoP"].FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(dpopProof))
+        {
+            if (!_options.EnableDpop)
+            {
+                return BadRequest(new TokenErrorResponse("invalid_request", "DPoP proof is not enabled."));
+            }
+
+            var proofValidation = await _dpopService.ValidateTokenRequestAsync(dpopProof, new()
+            {
+                HttpMethod = Request.Method,
+                Htu = endpoint
+            }, cancellationToken);
+            if (!proofValidation.IsSuccess)
+            {
+                return BadRequest(new TokenErrorResponse(proofValidation.Error ?? "invalid_dpop_proof", proofValidation.ErrorDescription));
+            }
+
+            dpopJkt = proofValidation.Jkt;
+        }
+        else if (client.RequireDpopProof)
+        {
+            return BadRequest(new TokenErrorResponse("use_dpop_proof", "This client requires a DPoP proof."));
+        }
+
         var result = grantType switch
         {
-            GrantType.ClientCredentials => await HandleClientCredentials(client, form, cancellationToken),
-            GrantType.AuthorizationCode => await HandleAuthorizationCode(client, form, cancellationToken),
-            GrantType.RefreshToken => await HandleRefreshToken(client, form, cancellationToken),
-            "urn:ietf:params:oauth:grant-type:device_code" => await HandleDeviceCode(client, form, cancellationToken),
+            GrantType.ClientCredentials => await HandleClientCredentials(client, form, dpopJkt, cancellationToken),
+            GrantType.AuthorizationCode => await HandleAuthorizationCode(client, form, dpopJkt, cancellationToken),
+            GrantType.RefreshToken => await HandleRefreshToken(client, form, dpopJkt, cancellationToken),
+            "urn:ietf:params:oauth:grant-type:device_code" => await HandleDeviceCode(client, form, dpopJkt, cancellationToken),
             _ => BadRequest(new TokenErrorResponse("unsupported_grant_type", $"Grant type '{grantType}' is not supported"))
         };
         return result;
     }
 
-    private async Task<IActionResult> HandleClientCredentials(Client client, IFormCollection form, CancellationToken ct)
+    private async Task<IActionResult> HandleClientCredentials(Client client, IFormCollection form, string? dpopJkt, CancellationToken ct)
     {
         var scope = form["scope"].ToString();
         var scopes = string.IsNullOrEmpty(scope) ? client.AllowedScopes : scope.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -106,6 +145,7 @@ public class TokenController : ControllerBase
         var result = await _tokenService.CreateAccessTokenAsync(new()
         {
             Client = client,
+            DPoPConfirmationJkt = dpopJkt,
             GrantType = GrantType.ClientCredentials,
             Scopes = validScopes
         }, ct);
@@ -117,7 +157,7 @@ public class TokenController : ControllerBase
         return Ok(new TokenSuccessResponse(result));
     }
 
-    private async Task<IActionResult> HandleAuthorizationCode(Client client, IFormCollection form, CancellationToken ct)
+    private async Task<IActionResult> HandleAuthorizationCode(Client client, IFormCollection form, string? dpopJkt, CancellationToken ct)
     {
         var code = form["code"].ToString();
         var redirectUri = form["redirect_uri"].ToString();
@@ -207,6 +247,7 @@ public class TokenController : ControllerBase
         var result = await _tokenService.CreateAccessTokenAsync(new()
         {
             Client = client,
+            DPoPConfirmationJkt = dpopJkt,
             GrantType = GrantType.AuthorizationCode,
             Scopes = scopes,
             SubjectId = grant.SubjectId,
@@ -224,7 +265,7 @@ public class TokenController : ControllerBase
         return Ok(new TokenSuccessResponse(result));
     }
 
-    private async Task<IActionResult> HandleRefreshToken(Client client, IFormCollection form, CancellationToken ct)
+    private async Task<IActionResult> HandleRefreshToken(Client client, IFormCollection form, string? dpopJkt, CancellationToken ct)
     {
         var refreshToken = form["refresh_token"].ToString();
         if (string.IsNullOrEmpty(refreshToken))
@@ -287,6 +328,7 @@ public class TokenController : ControllerBase
             var result = await _tokenService.CreateAccessTokenAsync(new()
             {
                 Client = client,
+                DPoPConfirmationJkt = dpopJkt,
                 GrantType = GrantType.RefreshToken,
                 Scopes = scopes,
                 SubjectId = originalGrant.SubjectId,
@@ -308,6 +350,7 @@ public class TokenController : ControllerBase
         var tokenResult = await _tokenService.CreateAccessTokenAsync(new()
         {
             Client = client,
+            DPoPConfirmationJkt = dpopJkt,
             GrantType = GrantType.RefreshToken,
             Scopes = scopes,
             SubjectId = originalGrant.SubjectId,
@@ -325,7 +368,7 @@ public class TokenController : ControllerBase
         return Ok(new TokenSuccessResponse(tokenResult));
     }
 
-    private async Task<IActionResult> HandleDeviceCode(Client client, IFormCollection form, CancellationToken ct)
+    private async Task<IActionResult> HandleDeviceCode(Client client, IFormCollection form, string? dpopJkt, CancellationToken ct)
     {
         var deviceCode = form["device_code"].ToString();
         if (string.IsNullOrEmpty(deviceCode))
@@ -381,6 +424,7 @@ public class TokenController : ControllerBase
         var result = await _tokenService.CreateAccessTokenAsync(new()
         {
             Client = client,
+            DPoPConfirmationJkt = dpopJkt,
             GrantType = GrantType.DeviceCode,
             Scopes = scopes,
             SubjectId = deviceCodeData.SubjectId
@@ -565,32 +609,6 @@ public class TokenController : ControllerBase
 
     private static string? GetRefreshTokenFamilyId(PersistedGrant grant) =>
         grant.Properties.TryGetValue("family_id", out var familyId) ? familyId : null;
-
-    private (string? clientId, string? clientSecret) ExtractClientCredentials(IFormCollection form)
-    {
-        // 优先从 Authorization header 提取 (Basic Auth)
-        var authHeader = Request.Headers.Authorization.ToString();
-        if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
-        {
-            try
-            {
-                var encoded = authHeader["Basic ".Length..].Trim();
-                var decoded = Encoding.UTF8.GetString(Convert.FromBase64String(encoded));
-                var parts = decoded.Split(':', 2);
-                if (parts.Length == 2)
-                {
-                    return (Uri.UnescapeDataString(parts[0]), Uri.UnescapeDataString(parts[1]));
-                }
-            }
-            catch
-            {
-                return (null, null);
-            }
-        }
-
-        // 从 POST body 提取
-        return (form["client_id"].ToString(), form["client_secret"].ToString());
-    }
 
     private static bool ValidatePkce(string codeVerifier, string? codeChallenge, string? method)
     {

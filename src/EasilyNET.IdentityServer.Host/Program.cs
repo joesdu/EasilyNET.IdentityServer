@@ -68,9 +68,15 @@ builder.Services.AddSingleton<ISerializationService, SerializationService>();
 builder.Services.AddSingleton<IAuthorizationRequestContextService, AuthorizationRequestContextService>();
 builder.Services.AddSingleton<IAuthorizationScopeMetadataService, AuthorizationScopeMetadataService>();
 builder.Services.AddSingleton<ITokenService, TokenService>();
+builder.Services.AddSingleton<IJwtClientAuthenticationValidator, JwtClientAuthenticationValidator>();
+builder.Services.AddSingleton<IMtlsClientAuthenticationValidator, MtlsClientAuthenticationValidator>();
+builder.Services.AddSingleton<IDPoPService, DPoPService>();
 builder.Services.AddSingleton<IClientAuthenticationService, ClientAuthenticationService>();
 builder.Services.AddSingleton<IAuthorizationService, AuthorizationService>();
 builder.Services.AddSingleton<IAuditService, AuditService>();
+builder.Services.AddSingleton<IDynamicClientRegistrationService, DynamicClientRegistrationService>();
+
+builder.Services.AddHttpClient();
 
 // 注册 HttpContextAccessor（审计服务和速率限制服务需要）
 builder.Services.AddHttpContextAccessor();
@@ -110,6 +116,7 @@ var app = builder.Build();
 
 // 配置中间件
 app.UseSerilogRequestLogging();
+app.UseForwardedClientCertificate();
 
 app.Use(async (context, next) =>
 {

@@ -15,15 +15,21 @@ namespace EasilyNET.IdentityServer.Core.Services;
 public class ClientAuthenticationService : IClientAuthenticationService
 {
     private readonly IClientStore _clientStore;
+    private readonly IJwtClientAuthenticationValidator _jwtClientAuthenticationValidator;
     private readonly ILogger<ClientAuthenticationService> _logger;
+    private readonly IMtlsClientAuthenticationValidator _mtlsClientAuthenticationValidator;
     private readonly IOptions<IdentityServerOptions> _options;
 
     public ClientAuthenticationService(
         IClientStore clientStore,
+        IJwtClientAuthenticationValidator jwtClientAuthenticationValidator,
+        IMtlsClientAuthenticationValidator mtlsClientAuthenticationValidator,
         IOptions<IdentityServerOptions> options,
         ILogger<ClientAuthenticationService> logger)
     {
         _clientStore = clientStore;
+        _jwtClientAuthenticationValidator = jwtClientAuthenticationValidator;
+        _mtlsClientAuthenticationValidator = mtlsClientAuthenticationValidator;
         _options = options;
         _logger = logger;
     }
@@ -74,6 +80,55 @@ public class ClientAuthenticationService : IClientAuthenticationService
                 IsSuccess = false,
                 Error = "unauthorized_client",
                 ErrorDescription = "client_credentials grant requires a confidential client"
+            };
+        }
+
+        var tokenEndpointAuthMethod = ResolveTokenEndpointAuthMethod(client);
+        if (string.Equals(tokenEndpointAuthMethod, "private_key_jwt", StringComparison.Ordinal))
+        {
+            var validation = await _jwtClientAuthenticationValidator.ValidateAsync(client, request, cancellationToken);
+            if (!validation.IsSuccess)
+            {
+                return new()
+                {
+                    IsSuccess = false,
+                    Error = validation.Error,
+                    ErrorDescription = validation.ErrorDescription
+                };
+            }
+            return new()
+            {
+                IsSuccess = true,
+                Client = client
+            };
+        }
+
+        if (string.Equals(tokenEndpointAuthMethod, "tls_client_auth", StringComparison.Ordinal) ||
+            string.Equals(tokenEndpointAuthMethod, "self_signed_tls_client_auth", StringComparison.Ordinal))
+        {
+            var validation = await _mtlsClientAuthenticationValidator.ValidateAsync(client, request, cancellationToken);
+            if (!validation.IsSuccess)
+            {
+                return new()
+                {
+                    IsSuccess = false,
+                    Error = validation.Error,
+                    ErrorDescription = validation.ErrorDescription
+                };
+            }
+            return new()
+            {
+                IsSuccess = true,
+                Client = client
+            };
+        }
+
+        if (string.Equals(tokenEndpointAuthMethod, "none", StringComparison.Ordinal) || !client.RequireClientSecret)
+        {
+            return new()
+            {
+                IsSuccess = true,
+                Client = client
             };
         }
 
@@ -163,7 +218,22 @@ public class ClientAuthenticationService : IClientAuthenticationService
         return grantType switch
         {
             "urn:ietf:params:oauth:grant-type:device_code" => GrantType.DeviceCode,
-            _                                              => grantType
+            _ => grantType
         };
+    }
+
+    private static string ResolveTokenEndpointAuthMethod(Client client)
+    {
+        if (!string.IsNullOrWhiteSpace(client.TokenEndpointAuthMethod))
+        {
+            return client.TokenEndpointAuthMethod;
+        }
+
+        if (client.ClientType == ClientType.Public || !client.RequireClientSecret)
+        {
+            return "none";
+        }
+
+        return "client_secret_basic";
     }
 }

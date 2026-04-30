@@ -1,3 +1,4 @@
+using System.Security.Cryptography.X509Certificates;
 using EasilyNET.IdentityServer.Abstractions.Models;
 
 namespace EasilyNET.IdentityServer.Abstractions.Services;
@@ -24,6 +25,11 @@ public class ClientAuthenticationRequest
     public string? ClientAssertion { get; init; }
 
     /// <summary>
+    /// 客户端断言类型
+    /// </summary>
+    public string? ClientAssertionType { get; init; }
+
+    /// <summary>
     /// 客户端Id
     /// </summary>
     public required string ClientId { get; init; }
@@ -34,9 +40,19 @@ public class ClientAuthenticationRequest
     public string? ClientSecret { get; init; }
 
     /// <summary>
+    /// 客户端证书
+    /// </summary>
+    public X509Certificate2? ClientCertificate { get; init; }
+
+    /// <summary>
     /// 授权类型
     /// </summary>
     public required string GrantType { get; init; }
+
+    /// <summary>
+    /// 请求的端点绝对地址
+    /// </summary>
+    public string? RequestedEndpoint { get; init; }
 
     /// <summary>
     /// 重定向 URI (Token 请求时)

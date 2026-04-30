@@ -8,6 +8,11 @@ namespace EasilyNET.IdentityServer.Abstractions.Stores;
 public interface IClientStore
 {
     /// <summary>
+    /// 创建客户端
+    /// </summary>
+    Task CreateClientAsync(Client client, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// 根据客户端Id查找客户端
     /// </summary>
     Task<Client?> FindClientByIdAsync(string clientId, CancellationToken cancellationToken = default);
