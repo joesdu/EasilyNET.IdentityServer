@@ -124,10 +124,10 @@ public class AuthorizeController : ControllerBase
         // 根据 prompt 参数处理
         if (!string.IsNullOrEmpty(prompt))
         {
-            var prompts = prompt.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var promptsArray = prompt.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
             // prompt=none: 不能显示登录或consent页面
-            if (prompts.Contains("none"))
+            if (promptsArray.Contains("none"))
             {
                 if (string.IsNullOrEmpty(subjectId))
                 {
@@ -138,7 +138,7 @@ public class AuthorizeController : ControllerBase
             }
 
             // prompt=login: 强制重新认证
-            if (prompts.Contains("login"))
+            if (promptsArray.Contains("login"))
             {
                 // 强制重新登录 - 清除现有 subjectId
                 subjectId = string.Empty;
