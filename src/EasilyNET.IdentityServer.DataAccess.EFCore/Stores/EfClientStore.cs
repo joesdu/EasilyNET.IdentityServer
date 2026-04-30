@@ -21,7 +21,6 @@ public class EfClientStore(IdentityServerDbContext db) : IClientStore
     {
         var entity = await db.Clients
                              .AsNoTracking()
-                             .AsSplitQuery()
                              .Include(c => c.AllowedGrantTypes)
                              .Include(c => c.RedirectUris)
                              .Include(c => c.FrontChannelLogoutUris)
@@ -41,7 +40,6 @@ public class EfClientStore(IdentityServerDbContext db) : IClientStore
     {
         var entities = await db.Clients
                                .AsNoTracking()
-                               .AsSplitQuery()
                                .Include(c => c.AllowedGrantTypes)
                                .Include(c => c.RedirectUris)
                                .Include(c => c.FrontChannelLogoutUris)

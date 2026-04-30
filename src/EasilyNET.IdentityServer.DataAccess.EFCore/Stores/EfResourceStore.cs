@@ -14,7 +14,6 @@ public class EfResourceStore(IdentityServerDbContext db) : IResourceStore
     {
         var entities = await db.ApiResources
                                .AsNoTracking()
-                               .AsSplitQuery()
                                .Include(r => r.Scopes).Include(r => r.UserClaims).Include(r => r.ApiSecrets).Include(r => r.Properties)
                                .Where(r => r.Enabled).ToListAsync(cancellationToken);
         return entities.Select(MapApiResource);
@@ -24,7 +23,6 @@ public class EfResourceStore(IdentityServerDbContext db) : IResourceStore
     {
         var entities = await db.IdentityResources
                                .AsNoTracking()
-                               .AsSplitQuery()
                                .Include(r => r.UserClaims).Include(r => r.Properties)
                                .Where(r => r.Enabled).ToListAsync(cancellationToken);
         return entities.Select(MapIdentityResource);
@@ -35,7 +33,6 @@ public class EfResourceStore(IdentityServerDbContext db) : IResourceStore
         var names = scopeNames.ToHashSet();
         var entities = await db.ApiResources
                                .AsNoTracking()
-                               .AsSplitQuery()
                                .Include(r => r.Scopes).Include(r => r.UserClaims).Include(r => r.ApiSecrets).Include(r => r.Properties)
                                .Where(r => r.Enabled && r.Scopes.Any(s => names.Contains(s.Scope)))
                                .ToListAsync(cancellationToken);
@@ -46,7 +43,6 @@ public class EfResourceStore(IdentityServerDbContext db) : IResourceStore
     {
         var entities = await db.ApiScopes
                                .AsNoTracking()
-                               .AsSplitQuery()
                                .Include(s => s.UserClaims).Include(s => s.Properties)
                                .Where(s => s.Enabled).ToListAsync(cancellationToken);
         return entities.Select(MapApiScope);
@@ -57,7 +53,6 @@ public class EfResourceStore(IdentityServerDbContext db) : IResourceStore
         var names = scopeNames.ToHashSet();
         var entities = await db.ApiScopes
                                .AsNoTracking()
-                               .AsSplitQuery()
                                .Include(s => s.UserClaims).Include(s => s.Properties)
                                .Where(s => s.Enabled && names.Contains(s.Name))
                                .ToListAsync(cancellationToken);

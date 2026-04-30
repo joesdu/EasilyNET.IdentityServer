@@ -193,7 +193,7 @@ public class TokenController : ControllerBase
             }
             if (!IsValidPkceValue(codeVerifier))
             {
-                return BadRequest(new TokenErrorResponse("invalid_request", "code_verifier must be 43-128 characters using RFC 7636 unreserved characters"));
+                return BadRequest(new TokenErrorResponse("invalid_grant", "code_verifier must be 43-128 characters using RFC 7636 unreserved characters"));
             }
             if (!ValidatePkce(codeVerifier, codeChallenge, codeChallengeMethod))
             {
