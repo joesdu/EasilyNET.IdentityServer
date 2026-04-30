@@ -97,6 +97,21 @@ public class AuthorizationService : IAuthorizationService
             };
         }
 
+        if (prompts.Length > 0 && client.AuthorizationPromptTypes.Any())
+        {
+            var allowedPrompts = client.AuthorizationPromptTypes.Distinct(StringComparer.Ordinal).ToHashSet(StringComparer.Ordinal);
+            var disallowedPrompts = prompts.Where(prompt => !allowedPrompts.Contains(prompt)).ToArray();
+            if (disallowedPrompts.Length > 0)
+            {
+                return new()
+                {
+                    IsSuccess = false,
+                    Error = "invalid_request",
+                    ErrorDescription = $"Client does not allow prompt value(s): {string.Join(", ", disallowedPrompts)}"
+                };
+            }
+        }
+
         // 验证 grant type
         if (!client.AllowedGrantTypes.Contains(GrantType.AuthorizationCode))
         {

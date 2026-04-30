@@ -11,6 +11,8 @@ namespace EasilyNET.IdentityServer.Admin.Api.Controllers;
 [Route("api/[controller]")]
 public class ClientsController(IdentityServerDbContext db) : ControllerBase
 {
+    private static readonly string[] SupportedPromptTypes = ["none", "login", "consent", "select_account"];
+
     [HttpGet]
     public async Task<IActionResult> GetAll(CancellationToken ct)
     {
@@ -19,6 +21,7 @@ public class ClientsController(IdentityServerDbContext db) : ControllerBase
                               .Include(c => c.AllowedScopes)
                               .Include(c => c.RedirectUris)
                               .Include(c => c.AllowedCorsOrigins)
+                              .Include(c => c.AuthorizationPromptTypes)
                               .Include(c => c.IdentityProviderRestrictions)
                               .Select(c => new
                               {
@@ -39,6 +42,7 @@ public class ClientsController(IdentityServerDbContext db) : ControllerBase
                                   c.AccessTokenLifetime,
                                   c.RefreshTokenLifetime,
                                   AllowedGrantTypes = c.AllowedGrantTypes.Select(g => g.GrantType),
+                                  AuthorizationPromptTypes = c.AuthorizationPromptTypes.Select(p => p.PromptType),
                                   AllowedScopes = c.AllowedScopes.Select(s => s.Scope),
                                   RedirectUris = c.RedirectUris.Select(r => r.RedirectUri),
                                   AllowedCorsOrigins = c.AllowedCorsOrigins.Select(o => o.Origin),
@@ -54,6 +58,7 @@ public class ClientsController(IdentityServerDbContext db) : ControllerBase
         var client = await db.Clients
                              .Include(c => c.AllowedGrantTypes).Include(c => c.AllowedScopes)
                              .Include(c => c.RedirectUris).Include(c => c.ClientSecrets)
+                             .Include(c => c.AuthorizationPromptTypes)
                              .Include(c => c.Claims).Include(c => c.AllowedCorsOrigins).Include(c => c.IdentityProviderRestrictions).Include(c => c.Properties)
                              .FirstOrDefaultAsync(c => c.Id == id, ct);
         if (client == null)
@@ -80,6 +85,7 @@ public class ClientsController(IdentityServerDbContext db) : ControllerBase
             client.RefreshTokenLifetime,
             client.AuthorizationCodeLifetime,
             AllowedGrantTypes = client.AllowedGrantTypes.Select(g => g.GrantType),
+            AuthorizationPromptTypes = client.AuthorizationPromptTypes.Select(p => p.PromptType),
             AllowedScopes = client.AllowedScopes.Select(s => s.Scope),
             RedirectUris = client.RedirectUris.Select(r => r.RedirectUri),
             AllowedCorsOrigins = client.AllowedCorsOrigins.Select(o => o.Origin),
@@ -115,6 +121,7 @@ public class ClientsController(IdentityServerDbContext db) : ControllerBase
             ClientUri = request.ClientUri,
             LogoUri = request.LogoUri,
             AllowedGrantTypes = request.AllowedGrantTypes.Select(g => new ClientGrantTypeEntity { GrantType = g }).ToList(),
+            AuthorizationPromptTypes = request.AuthorizationPromptTypes.Select(prompt => new ClientAuthorizationPromptTypeEntity { PromptType = prompt }).ToList(),
             AllowedScopes = request.AllowedScopes.Select(s => new ClientScopeEntity { Scope = s }).ToList(),
             RedirectUris = request.RedirectUris.Select(r => new ClientRedirectUriEntity { RedirectUri = r }).ToList(),
             AllowedCorsOrigins = request.AllowedCorsOrigins.Select(o => new ClientCorsOriginEntity { Origin = o }).ToList(),
@@ -132,6 +139,7 @@ public class ClientsController(IdentityServerDbContext db) : ControllerBase
         var entity = await db.Clients
                              .Include(c => c.AllowedGrantTypes).Include(c => c.AllowedScopes)
                              .Include(c => c.RedirectUris).Include(c => c.ClientSecrets)
+                             .Include(c => c.AuthorizationPromptTypes)
                              .Include(c => c.AllowedCorsOrigins).Include(c => c.IdentityProviderRestrictions)
                              .FirstOrDefaultAsync(c => c.Id == id, ct);
         if (entity == null)
@@ -165,6 +173,8 @@ public class ClientsController(IdentityServerDbContext db) : ControllerBase
         // 替换子集合
         entity.AllowedGrantTypes.Clear();
         entity.AllowedGrantTypes.AddRange(request.AllowedGrantTypes.Select(g => new ClientGrantTypeEntity { GrantType = g }));
+        entity.AuthorizationPromptTypes.Clear();
+        entity.AuthorizationPromptTypes.AddRange(request.AuthorizationPromptTypes.Select(prompt => new ClientAuthorizationPromptTypeEntity { PromptType = prompt }));
         entity.AllowedScopes.Clear();
         entity.AllowedScopes.AddRange(request.AllowedScopes.Select(s => new ClientScopeEntity { Scope = s }));
         entity.RedirectUris.Clear();
@@ -203,18 +213,19 @@ public class ClientsController(IdentityServerDbContext db) : ControllerBase
         }
 
         return await ValidateClientConfigurationAsync(request.ClientId, request.ClientType, request.RequireClientSecret, request.AllowedGrantTypes,
-            request.AllowedScopes, request.RedirectUris, request.AllowedCorsOrigins, request.IdentityProviderRestrictions, request.ClientSecrets, ct);
+            request.AuthorizationPromptTypes, request.AllowedScopes, request.RedirectUris, request.AllowedCorsOrigins, request.IdentityProviderRestrictions, request.ClientSecrets, ct);
     }
 
     private Task<ObjectResult?> ValidateUpdateRequestAsync(ClientEntity entity, UpdateClientRequest request, CancellationToken ct) =>
         ValidateClientConfigurationAsync(entity.ClientId, request.ClientType, request.RequireClientSecret, request.AllowedGrantTypes,
-            request.AllowedScopes, request.RedirectUris, request.AllowedCorsOrigins, request.IdentityProviderRestrictions, request.ClientSecrets, ct);
+            request.AuthorizationPromptTypes, request.AllowedScopes, request.RedirectUris, request.AllowedCorsOrigins, request.IdentityProviderRestrictions, request.ClientSecrets, ct);
 
     private async Task<ObjectResult?> ValidateClientConfigurationAsync(
         string clientId,
         int clientType,
         bool requireClientSecret,
         IEnumerable<string> allowedGrantTypes,
+        IEnumerable<string> authorizationPromptTypes,
         IEnumerable<string> allowedScopes,
         IEnumerable<string> redirectUris,
         IEnumerable<string> allowedCorsOrigins,
@@ -223,6 +234,7 @@ public class ClientsController(IdentityServerDbContext db) : ControllerBase
         CancellationToken ct)
     {
         var normalizedGrantTypes = allowedGrantTypes.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.Ordinal).ToArray();
+        var normalizedAuthorizationPromptTypes = authorizationPromptTypes.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.Ordinal).ToArray();
         var normalizedScopes = allowedScopes.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.Ordinal).ToArray();
         var normalizedRedirectUris = redirectUris.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.Ordinal).ToArray();
         var normalizedCorsOrigins = allowedCorsOrigins.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.Ordinal).ToArray();
@@ -280,6 +292,12 @@ public class ClientsController(IdentityServerDbContext db) : ControllerBase
             {
                 return ValidationProblem("identity_provider_restrictions", $"Identity provider '{identityProvider}' must not contain whitespace.");
             }
+        }
+
+        var unsupportedPromptTypes = normalizedAuthorizationPromptTypes.Where(prompt => !SupportedPromptTypes.Contains(prompt, StringComparer.Ordinal)).ToArray();
+        if (unsupportedPromptTypes.Length > 0)
+        {
+            return ValidationProblem("authorization_prompt_types", $"Unsupported prompt types: {string.Join(", ", unsupportedPromptTypes)}.");
         }
 
         var knownScopes = await db.ApiScopes.Select(x => x.Name)
@@ -365,6 +383,8 @@ public class CreateClientRequest
 
     public List<string> AllowedGrantTypes { get; set; } = [];
 
+    public List<string> AuthorizationPromptTypes { get; set; } = [];
+
     public List<string> IdentityProviderRestrictions { get; set; } = [];
 
     public List<string> AllowedCorsOrigins { get; set; } = [];
@@ -411,6 +431,8 @@ public class UpdateClientRequest
     public bool AllowRememberConsent { get; set; } = true;
 
     public List<string> AllowedGrantTypes { get; set; } = [];
+
+    public List<string> AuthorizationPromptTypes { get; set; } = [];
 
     public List<string> IdentityProviderRestrictions { get; set; } = [];
 

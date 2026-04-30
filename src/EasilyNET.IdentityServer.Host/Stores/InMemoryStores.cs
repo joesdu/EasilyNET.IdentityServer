@@ -85,6 +85,20 @@ public class InMemoryClientStore : IClientStore
         });
         _clients.Add(new()
         {
+            ClientId = "prompt-restricted",
+            ClientName = "Prompt Restricted SPA",
+            ClientType = ClientType.Public,
+            Enabled = true,
+            AllowedGrantTypes = [GrantType.AuthorizationCode],
+            RedirectUris = ["http://localhost:3000/prompt-restricted-callback"],
+            AllowedScopes = ["openid", "profile", "api1"],
+            RequirePkce = true,
+            RequireClientSecret = false,
+            RequireConsent = false,
+            AuthorizationPromptTypes = ["consent"]
+        });
+        _clients.Add(new()
+        {
             ClientId = "device",
             ClientName = "Device Client",
             ClientType = ClientType.Public,
@@ -195,7 +209,12 @@ public class InMemoryResourceStore : IResourceStore
             Description = "Main API",
             Enabled = true,
             Scopes = ["api1"],
-            UserClaims = ["scope", "role"]
+            UserClaims = ["scope", "role"],
+            Properties = new Dictionary<string, string>
+            {
+                ["audience"] = "api1",
+                ["tier"] = "standard"
+            }
         });
 
         // 添加 API 作用域
@@ -203,7 +222,13 @@ public class InMemoryResourceStore : IResourceStore
         {
             Name = "api1",
             DisplayName = "API 1 Access",
-            Enabled = true
+            Description = "Access to the main API",
+            Enabled = true,
+            UserClaims = ["scope"],
+            Properties = new Dictionary<string, string>
+            {
+                ["category"] = "api"
+            }
         });
 
         // 添加 Identity 资源
@@ -212,14 +237,24 @@ public class InMemoryResourceStore : IResourceStore
             Name = "openid",
             DisplayName = "Your user identifier",
             Required = true,
-            UserClaims = ["sub"]
+            Description = "Access to the subject identifier",
+            UserClaims = ["sub"],
+            Properties = new Dictionary<string, string>
+            {
+                ["group"] = "identity-core"
+            }
         });
         _identityResources.Add(new()
         {
             Name = "profile",
             DisplayName = "User profile",
             Emphasize = true,
-            UserClaims = ["name", "email", "picture"]
+            Description = "Access to basic profile information",
+            UserClaims = ["name", "email", "picture"],
+            Properties = new Dictionary<string, string>
+            {
+                ["group"] = "identity-profile"
+            }
         });
         _identityResources.Add(new()
         {

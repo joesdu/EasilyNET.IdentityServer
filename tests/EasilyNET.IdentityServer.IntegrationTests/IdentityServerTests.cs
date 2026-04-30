@@ -461,6 +461,21 @@ public class IdentityServerTests
     }
 
     /// <summary>
+    /// Test client-specific authorization prompt restrictions reject unsupported prompt values
+    /// </summary>
+    [TestMethod]
+    public async Task AuthorizationCode_ClientPromptRestrictions_RejectUnsupportedPrompt()
+    {
+        var verifier = CreateCodeVerifier();
+        var challenge = CreateCodeChallenge(verifier);
+        var response = await _client.GetAsync($"/connect/authorize?response_type=code&client_id=prompt-restricted&redirect_uri={Uri.EscapeDataString("http://localhost:3000/prompt-restricted-callback")}&scope=openid%20profile%20api1&prompt=login&code_challenge={challenge}&code_challenge_method=S256&subject_id=test-user&state=prompt-blocked");
+
+        var query = System.Web.HttpUtility.ParseQueryString(GetAuthorizationResponseUri(response).Query);
+        Assert.AreEqual("invalid_request", query["error"]);
+        StringAssert.Contains(query["error_description"], "Client does not allow prompt value");
+    }
+
+    /// <summary>
     /// Test prompt=none cannot be combined with other prompt values
     /// </summary>
     [TestMethod]
@@ -581,6 +596,11 @@ public class IdentityServerTests
         Assert.IsTrue(requestedScopeDetails.Any(scope => scope.GetProperty("name").GetString() == "openid" && scope.GetProperty("required").GetBoolean() && scope.GetProperty("type").GetString() == "identity"));
         Assert.IsTrue(requestedScopeDetails.Any(scope => scope.GetProperty("name").GetString() == "profile" && scope.GetProperty("emphasize").GetBoolean()));
         Assert.IsTrue(requestedScopeDetails.Any(scope => scope.GetProperty("name").GetString() == "api1" && scope.GetProperty("displayName").GetString() == "API 1 Access" && scope.GetProperty("type").GetString() == "api"));
+        Assert.IsTrue(requestedScopeDetails.Any(scope => scope.GetProperty("name").GetString() == "openid" && scope.GetProperty("displayGroup").GetString() == "Identity resources"));
+        Assert.IsTrue(requestedScopeDetails.Any(scope => scope.GetProperty("name").GetString() == "profile" && scope.GetProperty("properties").GetProperty("group").GetString() == "identity-profile"));
+        Assert.IsTrue(requestedScopeDetails.Any(scope => scope.GetProperty("name").GetString() == "api1" && scope.GetProperty("displayGroup").GetString() == "API 1"));
+        Assert.IsTrue(requestedScopeDetails.Any(scope => scope.GetProperty("name").GetString() == "api1" && scope.GetProperty("userClaims").EnumerateArray().Any(claim => claim.GetString() == "role")));
+        Assert.IsTrue(requestedScopeDetails.Any(scope => scope.GetProperty("name").GetString() == "api1" && scope.GetProperty("resources")[0].GetProperty("properties").GetProperty("audience").GetString() == "api1"));
 
         var contextResponse = await _client.GetAsync($"/connect/authorize/context/{requestId}");
         contextResponse.EnsureSuccessStatusCode();

@@ -17,6 +17,7 @@ public class EfClientStore(IdentityServerDbContext db) : IClientStore
                              .Include(c => c.RedirectUris)
                              .Include(c => c.AllowedScopes)
                              .Include(c => c.ClientSecrets)
+                             .Include(c => c.AuthorizationPromptTypes)
                              .Include(c => c.Claims)
                              .Include(c => c.AllowedCorsOrigins)
                              .Include(c => c.IdentityProviderRestrictions)
@@ -32,6 +33,7 @@ public class EfClientStore(IdentityServerDbContext db) : IClientStore
                                .Include(c => c.RedirectUris)
                                .Include(c => c.AllowedScopes)
                                .Include(c => c.ClientSecrets)
+                               .Include(c => c.AuthorizationPromptTypes)
                                .Include(c => c.Claims)
                                .Include(c => c.AllowedCorsOrigins)
                                .Include(c => c.IdentityProviderRestrictions)
@@ -50,6 +52,7 @@ public class EfClientStore(IdentityServerDbContext db) : IClientStore
             Enabled = e.Enabled,
             ClientType = (ClientType)e.ClientType,
             AllowedGrantTypes = e.AllowedGrantTypes.Select(g => g.GrantType).ToList(),
+            AuthorizationPromptTypes = e.AuthorizationPromptTypes.Select(p => p.PromptType).ToList(),
             RedirectUris = e.RedirectUris.Select(r => r.RedirectUri).ToList(),
             AllowedScopes = e.AllowedScopes.Select(s => s.Scope).ToList(),
             ClientSecrets = e.ClientSecrets.Select(s => new Secret { Value = s.Value, Description = s.Description, Expiration = s.Expiration, Type = s.Type }).ToList(),

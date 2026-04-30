@@ -19,6 +19,8 @@ public class ClientEntity
 
     public int AuthorizationCodeLifetime { get; set; } = 300;
 
+    public List<ClientAuthorizationPromptTypeEntity> AuthorizationPromptTypes { get; set; } = [];
+
     public List<ClientClaimEntity> Claims { get; set; } = [];
 
     public required string ClientId { get; set; }
@@ -123,6 +125,17 @@ public class ClientClaimEntity
     public required string Type { get; set; }
 
     public required string Value { get; set; }
+}
+
+public class ClientAuthorizationPromptTypeEntity
+{
+    public ClientEntity Client { get; set; } = null!;
+
+    public int ClientId { get; set; }
+
+    public int Id { get; set; }
+
+    public required string PromptType { get; set; }
 }
 
 public class ClientCorsOriginEntity

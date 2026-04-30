@@ -28,6 +28,8 @@ public class IdentityServerDbContext(DbContextOptions<IdentityServerDbContext> o
 
     public DbSet<ClientClaimEntity> ClientClaims => Set<ClientClaimEntity>();
 
+    public DbSet<ClientAuthorizationPromptTypeEntity> ClientAuthorizationPromptTypes => Set<ClientAuthorizationPromptTypeEntity>();
+
     public DbSet<ClientCorsOriginEntity> ClientCorsOrigins => Set<ClientCorsOriginEntity>();
 
     public DbSet<ClientGrantTypeEntity> ClientGrantTypes => Set<ClientGrantTypeEntity>();
@@ -69,6 +71,7 @@ public class IdentityServerDbContext(DbContextOptions<IdentityServerDbContext> o
             b.HasMany(x => x.RedirectUris).WithOne(x => x.Client).HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.AllowedScopes).WithOne(x => x.Client).HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.ClientSecrets).WithOne(x => x.Client).HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Cascade);
+            b.HasMany(x => x.AuthorizationPromptTypes).WithOne(x => x.Client).HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.Claims).WithOne(x => x.Client).HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.AllowedCorsOrigins).WithOne(x => x.Client).HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.IdentityProviderRestrictions).WithOne(x => x.Client).HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Cascade);

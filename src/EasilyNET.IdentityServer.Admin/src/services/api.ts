@@ -22,6 +22,7 @@ export interface Client {
   refreshTokenLifetime: number;
   authorizationCodeLifetime?: number;
   allowedGrantTypes: string[];
+  authorizationPromptTypes?: string[];
   allowedScopes: string[];
   redirectUris: string[];
   allowedCorsOrigins?: string[];
@@ -52,6 +53,7 @@ export interface CreateClientRequest {
   authorizationCodeLifetime?: number;
   deviceCodeLifetime?: number;
   allowedGrantTypes: string[];
+  authorizationPromptTypes?: string[];
   allowedScopes: string[];
   redirectUris: string[];
   allowedCorsOrigins?: string[];

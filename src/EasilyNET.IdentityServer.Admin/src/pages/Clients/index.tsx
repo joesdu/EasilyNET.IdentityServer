@@ -12,6 +12,13 @@ const grantTypeOptions = [
   { label: 'Device Code', value: 'device_code' },
 ];
 
+const promptTypeOptions = [
+  { label: 'none', value: 'none' },
+  { label: 'login', value: 'login' },
+  { label: 'consent', value: 'consent' },
+  { label: 'select_account', value: 'select_account' },
+];
+
 const clientTypeOptions = [
   { label: '机密客户端', value: 0 },
   { label: '公开客户端', value: 1 },
@@ -66,6 +73,7 @@ export default function ClientsPage() {
         form.setFieldsValue({
           ...fullClient,
           allowedGrantTypes: fullClient.allowedGrantTypes || [],
+          authorizationPromptTypes: fullClient.authorizationPromptTypes || [],
           allowedScopes: fullClient.allowedScopes || [],
           redirectUris: fullClient.redirectUris || [],
           allowedCorsOrigins: fullClient.allowedCorsOrigins || [],
@@ -98,6 +106,7 @@ export default function ClientsPage() {
         authorizationCodeLifetime: values.authorizationCodeLifetime,
         deviceCodeLifetime: values.deviceCodeLifetime,
         allowedGrantTypes: values.allowedGrantTypes || [],
+        authorizationPromptTypes: values.authorizationPromptTypes || [],
         allowedScopes: values.allowedScopes || [],
         redirectUris: values.redirectUris || [],
         allowedCorsOrigins: values.allowedCorsOrigins || [],
@@ -271,6 +280,9 @@ export default function ClientsPage() {
             </Row>
             <Form.Item name="allowedGrantTypes" label="授权类型" rules={[{ required: true, message: '请选择授权类型' }]}>
               <Select mode="multiple" options={grantTypeOptions} placeholder="选择授权类型" />
+            </Form.Item>
+            <Form.Item name="authorizationPromptTypes" label="允许的 Prompt 类型" extra="可选。配置后将限制客户端可使用的 prompt 值。">
+              <Select mode="multiple" options={promptTypeOptions} placeholder="选择允许的 prompt 类型" />
             </Form.Item>
             <Form.Item name="allowedScopes" label="允许的作用域">
               <Select mode="multiple" options={scopeOptions} placeholder="选择允许的作用域" />
