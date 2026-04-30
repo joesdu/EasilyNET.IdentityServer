@@ -60,19 +60,25 @@ public class TokenController : ControllerBase
             return BadRequest(new TokenErrorResponse("invalid_request", "grant_type is required"));
         }
 
-        // 提取客户端凭据 (支持 Basic Auth 和 POST body)
-        var (clientId, clientSecret) = ExtractClientCredentials(form);
+        // 提取客户端凭据 (支持 Basic Auth, POST body, 和 JWT assertion)
+        var (clientId, clientSecret, clientAssertion, clientAssertionType) = ExtractClientCredentials(form);
         if (string.IsNullOrEmpty(clientId))
         {
             return BadRequest(new TokenErrorResponse("invalid_client", "client_id is required"));
         }
+
+        // 构建token端点URL用于JWT验证
+        var tokenEndpoint = $"{_options.Issuer.TrimEnd('/')}/connect/token";
 
         // 认证客户端
         var authResult = await _clientAuth.AuthenticateClientAsync(new()
         {
             ClientId = clientId,
             ClientSecret = clientSecret,
-            GrantType = grantType
+            ClientAssertion = clientAssertion,
+            ClientAssertionType = clientAssertionType,
+            GrantType = grantType,
+            TokenEndpoint = tokenEndpoint
         }, cancellationToken);
         if (!authResult.IsSuccess)
         {
@@ -566,8 +572,13 @@ public class TokenController : ControllerBase
     private static string? GetRefreshTokenFamilyId(PersistedGrant grant) =>
         grant.Properties.TryGetValue("family_id", out var familyId) ? familyId : null;
 
-    private (string? clientId, string? clientSecret) ExtractClientCredentials(IFormCollection form)
+    private (string? clientId, string? clientSecret, string? clientAssertion, string? clientAssertionType) ExtractClientCredentials(IFormCollection form)
     {
+        string? clientId = null;
+        string? clientSecret = null;
+        string? clientAssertion = null;
+        string? clientAssertionType = null;
+
         // 优先从 Authorization header 提取 (Basic Auth)
         var authHeader = Request.Headers.Authorization.ToString();
         if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
@@ -579,17 +590,34 @@ public class TokenController : ControllerBase
                 var parts = decoded.Split(':', 2);
                 if (parts.Length == 2)
                 {
-                    return (Uri.UnescapeDataString(parts[0]), Uri.UnescapeDataString(parts[1]));
+                    clientId = Uri.UnescapeDataString(parts[0]);
+                    clientSecret = Uri.UnescapeDataString(parts[1]);
                 }
             }
             catch
             {
-                return (null, null);
+                // Ignore basic auth parsing errors
             }
         }
 
-        // 从 POST body 提取
-        return (form["client_id"].ToString(), form["client_secret"].ToString());
+        // 从 POST body 提取 (可能覆盖 Basic Auth)
+        var formClientId = form["client_id"].ToString();
+        if (!string.IsNullOrEmpty(formClientId))
+        {
+            clientId = formClientId;
+        }
+
+        var formClientSecret = form["client_secret"].ToString();
+        if (!string.IsNullOrEmpty(formClientSecret))
+        {
+            clientSecret = formClientSecret;
+        }
+
+        // 提取 JWT 断言参数 (RFC 7523)
+        clientAssertion = form["client_assertion"].ToString();
+        clientAssertionType = form["client_assertion_type"].ToString();
+
+        return (clientId, clientSecret, clientAssertion, clientAssertionType);
     }
 
     private static bool ValidatePkce(string codeVerifier, string? codeChallenge, string? method)

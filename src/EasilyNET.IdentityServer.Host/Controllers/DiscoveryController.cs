@@ -40,7 +40,8 @@ public class DiscoveryController : ControllerBase
         var tokenEndpointAuthMethods = new HashSet<string>(StringComparer.Ordinal)
         {
             "client_secret_basic",
-            "client_secret_post"
+            "client_secret_post",
+            "private_key_jwt"  // RFC 7523: Private Key JWT authentication
         };
         if (clients.Any(x => x.ClientType == ClientType.Public || !x.RequireClientSecret))
         {
@@ -94,8 +95,9 @@ var scopeNames = scopes.Select(s => s.Name)
             ["frontchannel_logout_supported"] = true,
             ["frontchannel_logout_session_supported"] = true,
             ["end_session_endpoint"] = $"{issuer}/connect/logout",
-            ["service_documentation"] = "https://docs.example.com",
-            ["dpop_signing_alg_values_supported"] = new[] { "RS256", "RS384", "RS512" }
+            ["service_documentation"] = "https://docs.example.com"
+            // DPoP (RFC 9449) support will be added in future release
+            // ["dpop_signing_alg_values_supported"] = new[] { "RS256", "RS384", "RS512" }
         };
         return Ok(discovery);
     }

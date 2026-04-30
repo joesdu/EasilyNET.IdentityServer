@@ -72,6 +72,15 @@ builder.Services.AddSingleton<IClientAuthenticationService, ClientAuthentication
 builder.Services.AddSingleton<IAuthorizationService, AuthorizationService>();
 builder.Services.AddSingleton<IAuditService, AuditService>();
 
+// 注册 JWT 客户端认证验证器 (RFC 7523)
+builder.Services.AddSingleton<JwtClientAuthenticationValidator>();
+
+// 注册 HttpClient 用于获取远程 JWKS
+builder.Services.AddHttpClient("JwksClient").ConfigureHttpClient(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(30);
+});
+
 // 注册 HttpContextAccessor（审计服务和速率限制服务需要）
 builder.Services.AddHttpContextAccessor();
 

@@ -159,6 +159,37 @@ public class Client
     /// 用户代码类型
     /// </summary>
     public string? UserCodeType { get; init; }
+
+    /// <summary>
+    /// JSON Web Key Set (JWKS) - 用于 Private Key JWT 客户端认证
+    /// </summary>
+    public string? Jwks { get; init; }
+
+    /// <summary>
+    /// JWKS URI - 用于从远程获取客户端的公钥
+    /// </summary>
+    public string? JwksUri { get; init; }
+
+    /// <summary>
+    /// Token 端点认证方法
+    /// 支持: client_secret_basic, client_secret_post, private_key_jwt, tls_client_auth, self_signed_tls_client_auth, none
+    /// </summary>
+    public string TokenEndpointAuthMethod { get; init; } = "client_secret_basic";
+
+    /// <summary>
+    /// Token 端点认证签名算法 (用于 private_key_jwt)
+    /// </summary>
+    public string? TokenEndpointAuthSigningAlg { get; init; }
+
+    /// <summary>
+    /// TLS 客户端认证主体 DN (用于 tls_client_auth)
+    /// </summary>
+    public string? TlsClientAuthSubjectDn { get; init; }
+
+    /// <summary>
+    /// TLS 客户端证书绑定的访问令牌 (用于 tls_client_auth)
+    /// </summary>
+    public bool TlsClientCertificateBoundAccessTokens { get; init; }
 }
 
 /// <summary>

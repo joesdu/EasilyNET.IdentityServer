@@ -17,15 +17,18 @@ public class ClientAuthenticationService : IClientAuthenticationService
     private readonly IClientStore _clientStore;
     private readonly ILogger<ClientAuthenticationService> _logger;
     private readonly IOptions<IdentityServerOptions> _options;
+    private readonly JwtClientAuthenticationValidator? _jwtValidator;
 
     public ClientAuthenticationService(
         IClientStore clientStore,
         IOptions<IdentityServerOptions> options,
-        ILogger<ClientAuthenticationService> logger)
+        ILogger<ClientAuthenticationService> logger,
+        JwtClientAuthenticationValidator? jwtValidator = null)
     {
         _clientStore = clientStore;
         _options = options;
         _logger = logger;
+        _jwtValidator = jwtValidator;
     }
 
     /// <inheritdoc />
@@ -77,38 +80,145 @@ public class ClientAuthenticationService : IClientAuthenticationService
             };
         }
 
-        // 验证客户端 Secret (仅对机密客户端)
-        if (client.ClientType == ClientType.Confidential)
+        // 确定客户端认证方法
+        var authMethod = DetermineAuthMethod(request, client);
+
+        // 根据认证方法验证客户端
+        switch (authMethod)
         {
-            if (client.RequireClientSecret)
-            {
-                if (string.IsNullOrEmpty(request.ClientSecret))
+            case "private_key_jwt":
+                // RFC 7523: Private Key JWT 客户端认证
+                if (_jwtValidator == null)
                 {
-                    _logger.LogWarning("Client secret required but not provided");
+                    _logger.LogWarning("JWT validator not configured but client uses private_key_jwt");
                     return new()
                     {
                         IsSuccess = false,
                         Error = "invalid_client",
-                        ErrorDescription = "Client secret is required"
+                        ErrorDescription = "JWT authentication not supported"
                     };
                 }
-                if (!ValidateClientSecret(client.ClientSecrets, request.ClientSecret))
+                if (string.IsNullOrEmpty(request.ClientAssertion) || string.IsNullOrEmpty(request.ClientAssertionType))
                 {
-                    _logger.LogWarning("Invalid client secret");
+                    _logger.LogWarning("Client assertion required for private_key_jwt");
                     return new()
                     {
                         IsSuccess = false,
                         Error = "invalid_client",
-                        ErrorDescription = "Invalid client credentials"
+                        ErrorDescription = "client_assertion and client_assertion_type are required"
                     };
                 }
-            }
+                if (string.IsNullOrEmpty(request.TokenEndpoint))
+                {
+                    _logger.LogWarning("Token endpoint required for JWT validation");
+                    return new()
+                    {
+                        IsSuccess = false,
+                        Error = "invalid_client",
+                        ErrorDescription = "Token endpoint required for validation"
+                    };
+                }
+                var (isValid, errorDesc) = await _jwtValidator.ValidateJwtAsync(
+                    request.ClientAssertion,
+                    request.ClientAssertionType,
+                    client,
+                    request.TokenEndpoint,
+                    cancellationToken);
+                if (!isValid)
+                {
+                    _logger.LogWarning("JWT assertion validation failed: {Error}", errorDesc);
+                    return new()
+                    {
+                        IsSuccess = false,
+                        Error = "invalid_client",
+                        ErrorDescription = errorDesc
+                    };
+                }
+                break;
+
+            case "client_secret_basic":
+            case "client_secret_post":
+                // 传统的客户端密钥认证
+                if (client.ClientType == ClientType.Confidential && client.RequireClientSecret)
+                {
+                    if (string.IsNullOrEmpty(request.ClientSecret))
+                    {
+                        _logger.LogWarning("Client secret required but not provided");
+                        return new()
+                        {
+                            IsSuccess = false,
+                            Error = "invalid_client",
+                            ErrorDescription = "Client secret is required"
+                        };
+                    }
+                    if (!ValidateClientSecret(client.ClientSecrets, request.ClientSecret))
+                    {
+                        _logger.LogWarning("Invalid client secret");
+                        return new()
+                        {
+                            IsSuccess = false,
+                            Error = "invalid_client",
+                            ErrorDescription = "Invalid client credentials"
+                        };
+                    }
+                }
+                break;
+
+            case "none":
+                // 公开客户端，无需认证
+                if (client.ClientType != ClientType.Public && client.RequireClientSecret)
+                {
+                    _logger.LogWarning("Public authentication method used for confidential client");
+                    return new()
+                    {
+                        IsSuccess = false,
+                        Error = "invalid_client",
+                        ErrorDescription = "Confidential client requires authentication"
+                    };
+                }
+                break;
+
+            default:
+                _logger.LogWarning("Unsupported authentication method: {Method}", authMethod);
+                return new()
+                {
+                    IsSuccess = false,
+                    Error = "invalid_client",
+                    ErrorDescription = $"Authentication method '{authMethod}' is not supported"
+                };
         }
+
         return new()
         {
             IsSuccess = true,
             Client = client
         };
+    }
+
+    /// <summary>
+    /// 确定客户端使用的认证方法
+    /// </summary>
+    private static string DetermineAuthMethod(ClientAuthenticationRequest request, Client client)
+    {
+        // 如果客户端指定了认证方法，使用它
+        if (!string.IsNullOrEmpty(client.TokenEndpointAuthMethod))
+        {
+            return client.TokenEndpointAuthMethod;
+        }
+
+        // 否则根据请求参数推断
+        if (!string.IsNullOrEmpty(request.ClientAssertion))
+        {
+            return "private_key_jwt";
+        }
+
+        if (!string.IsNullOrEmpty(request.ClientSecret))
+        {
+            return "client_secret_post"; // 默认使用 POST
+        }
+
+        // 公开客户端
+        return "none";
     }
 
     private static bool ValidateClientSecret(IEnumerable<Secret> secrets, string secret)

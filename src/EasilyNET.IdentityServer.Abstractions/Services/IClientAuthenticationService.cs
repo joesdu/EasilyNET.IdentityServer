@@ -24,6 +24,11 @@ public class ClientAuthenticationRequest
     public string? ClientAssertion { get; init; }
 
     /// <summary>
+    /// 客户端断言类型 (urn:ietf:params:oauth:client-assertion-type:jwt-bearer)
+    /// </summary>
+    public string? ClientAssertionType { get; init; }
+
+    /// <summary>
     /// 客户端Id
     /// </summary>
     public required string ClientId { get; init; }
@@ -42,6 +47,11 @@ public class ClientAuthenticationRequest
     /// 重定向 URI (Token 请求时)
     /// </summary>
     public string? RedirectUri { get; init; }
+
+    /// <summary>
+    /// Token 端点 URL (用于验证 JWT 断言的 aud 声明)
+    /// </summary>
+    public string? TokenEndpoint { get; init; }
 }
 
 /// <summary>
