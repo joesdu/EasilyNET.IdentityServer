@@ -1,27 +1,36 @@
 using System;
+using System.Collections.Generic;
 using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
+using EasilyNET.IdentityServer.Abstractions.Services;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Xunit;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace EasilyNET.IdentityServer.IntegrationTests;
 
 /// <summary>
 /// 速率限制集成测试
 /// </summary>
-public class RateLimitTests : IClassFixture<WebApplicationFactory<Program>>
+[TestClass]
+public class RateLimitTests
 {
-    private readonly WebApplicationFactory<Program> _factory;
-    private readonly HttpClient _client;
+    private WebApplicationFactory<Program> _factory = null!;
+    private HttpClient _client = null!;
 
-    public RateLimitTests(WebApplicationFactory<Program> factory)
+    [TestInitialize]
+    public void Setup()
     {
-        _factory = factory.WithWebHostBuilder(builder =>
+        _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             // 配置测试环境
             builder.ConfigureServices(services =>
             {
+                services.RemoveAll<ISigningService>();
+                services.AddSingleton<ISigningService, TestSigningService>();
+
                 // 配置更严格的限制用于测试
                 services.Configure<EasilyNET.IdentityServer.Abstractions.Extensions.RateLimitOptions>(options =>
                 {
@@ -33,6 +42,12 @@ public class RateLimitTests : IClassFixture<WebApplicationFactory<Program>>
                             EndpointPattern = "/connect/token",
                             WindowSeconds = 60,
                             MaxRequests = 3 // 测试用限制
+                        },
+                        new()
+                        {
+                            EndpointPattern = "*",
+                            WindowSeconds = 60,
+                            MaxRequests = 120
                         }
                     };
                     options.IncludeHeaders = true;
@@ -43,120 +58,110 @@ public class RateLimitTests : IClassFixture<WebApplicationFactory<Program>>
         _client = _factory.CreateClient();
     }
 
-    [Fact]
+    [TestCleanup]
+    public void Cleanup()
+    {
+        _client.Dispose();
+        _factory.Dispose();
+    }
+
+    [TestMethod]
     public async Task TokenEndpoint_WithinLimit_ShouldReturn200()
     {
         // Act
-        var content = new FormUrlEncodedContent(new[]
-        {
-            new KeyValuePair<string, string>("grant_type", "client_credentials"),
-            new KeyValuePair<string, string>("client_id", "console"),
-            new KeyValuePair<string, string>("client_secret", "secret"),
-            new KeyValuePair<string, string>("scope", "api1")
-        });
-
-        var response = await _client.PostAsync("/connect/token", content);
+        var response = await _client.PostAsync("/connect/token", CreateValidTokenRequest());
 
         // Assert
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.True(response.Headers.Contains("X-RateLimit-Limit"));
-        Assert.True(response.Headers.Contains("X-RateLimit-Remaining"));
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+        Assert.IsTrue(response.Headers.Contains("X-RateLimit-Limit"));
+        Assert.IsTrue(response.Headers.Contains("X-RateLimit-Remaining"));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task TokenEndpoint_ExceedsLimit_ShouldReturn429()
     {
-        // Arrange - 先消耗掉所有配额
-        var content = new FormUrlEncodedContent(new[]
-        {
-            new KeyValuePair<string, string>("grant_type", "client_credentials"),
-            new KeyValuePair<string, string>("client_id", "console"),
-            new KeyValuePair<string, string>("client_secret", "secret"),
-            new KeyValuePair<string, string>("scope", "api1")
-        });
-
         // Act - 发送超过限制的请求
-        for (int i = 0; i < 3; i++)
+        for (var i = 0; i < 3; i++)
         {
-            var response = await _client.PostAsync("/connect/token", content);
+            await _client.PostAsync("/connect/token", CreateValidTokenRequest());
         }
 
         // 第4个请求应该被限制
-        var limitedResponse = await _client.PostAsync("/connect/token", content);
+        var limitedResponse = await _client.PostAsync("/connect/token", CreateValidTokenRequest());
 
         // Assert
-        Assert.Equal(HttpStatusCode.TooManyRequests, limitedResponse.StatusCode);
-        Assert.True(limitedResponse.Headers.Contains("Retry-After"));
+        Assert.AreEqual(HttpStatusCode.TooManyRequests, limitedResponse.StatusCode);
+        Assert.IsTrue(limitedResponse.Headers.Contains("Retry-After"));
 
         var responseBody = await limitedResponse.Content.ReadAsStringAsync();
-        Assert.Contains("rate_limit_exceeded", responseBody);
+        StringAssert.Contains(responseBody, "rate_limit_exceeded");
     }
 
-    [Fact]
+    [TestMethod]
     public async Task TokenEndpoint_RateLimitHeaders_ShouldBePresent()
     {
         // Act
-        var content = new FormUrlEncodedContent(new[]
-        {
-            new KeyValuePair<string, string>("grant_type", "client_credentials"),
-            new KeyValuePair<string, string>("client_id", "console"),
-            new KeyValuePair<string, string>("client_secret", "secret"),
-            new KeyValuePair<string, string>("scope", "api1")
-        });
-
-        var response = await _client.PostAsync("/connect/token", content);
+        var response = await _client.PostAsync("/connect/token", CreateValidTokenRequest());
 
         // Assert
-        Assert.True(response.Headers.Contains("X-RateLimit-Limit"));
-        Assert.True(response.Headers.Contains("X-RateLimit-Remaining"));
-        Assert.True(response.Headers.Contains("X-RateLimit-Reset"));
+        Assert.IsTrue(response.Headers.Contains("X-RateLimit-Limit"));
+        Assert.IsTrue(response.Headers.Contains("X-RateLimit-Remaining"));
+        Assert.IsTrue(response.Headers.Contains("X-RateLimit-Reset"));
 
         var limit = response.Headers.GetValues("X-RateLimit-Limit").First();
-        Assert.Equal("3", limit);
+        Assert.AreEqual("3", limit);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task DiscoveryEndpoint_ShouldNotBeRateLimited()
     {
         // Act
         var response = await _client.GetAsync("/.well-known/openid-configuration");
 
         // Assert
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task TokenEndpoint_InvalidClient_ShouldStillCountTowardsRateLimit()
     {
-        // Arrange
-        var content = new FormUrlEncodedContent(new[]
-        {
-            new KeyValuePair<string, string>("grant_type", "client_credentials"),
-            new KeyValuePair<string, string>("client_id", "invalid-client"),
-            new KeyValuePair<string, string>("client_secret", "wrong-secret"),
-            new KeyValuePair<string, string>("scope", "api1")
-        });
-
         // Act - 发送多次无效请求
-        for (int i = 0; i < 3; i++)
+        for (var i = 0; i < 3; i++)
         {
-            var response = await _client.PostAsync("/connect/token", content);
+            var response = await _client.PostAsync("/connect/token", CreateInvalidClientTokenRequest());
             // 即使是 401 也应该计数
-            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+            Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
         }
 
         // 第4个请求应该被限制
-        var limitedResponse = await _client.PostAsync("/connect/token", content);
+        var limitedResponse = await _client.PostAsync("/connect/token", CreateInvalidClientTokenRequest());
 
         // Assert
-        Assert.Equal(HttpStatusCode.TooManyRequests, limitedResponse.StatusCode);
+        Assert.AreEqual(HttpStatusCode.TooManyRequests, limitedResponse.StatusCode);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task DifferentEndpoints_ShouldHaveIndependentLimits()
     {
-        // Arrange
-        var tokenContent = new FormUrlEncodedContent(new[]
+        // Act - 消耗 Token 端点配额
+        for (var i = 0; i < 3; i++)
+        {
+            await _client.PostAsync("/connect/token", CreateValidTokenRequest());
+        }
+
+        // Token 端点应该被限制
+        var tokenResponse = await _client.PostAsync("/connect/token", CreateValidTokenRequest());
+
+        // 但其他端点应该仍然可以访问
+        var discoveryResponse = await _client.GetAsync("/.well-known/openid-configuration");
+
+        // Assert
+        Assert.AreEqual(HttpStatusCode.TooManyRequests, tokenResponse.StatusCode);
+        Assert.AreEqual(HttpStatusCode.OK, discoveryResponse.StatusCode);
+    }
+
+    private static FormUrlEncodedContent CreateValidTokenRequest() =>
+        new(new[]
         {
             new KeyValuePair<string, string>("grant_type", "client_credentials"),
             new KeyValuePair<string, string>("client_id", "console"),
@@ -164,20 +169,12 @@ public class RateLimitTests : IClassFixture<WebApplicationFactory<Program>>
             new KeyValuePair<string, string>("scope", "api1")
         });
 
-        // Act - 消耗 Token 端点配额
-        for (int i = 0; i < 3; i++)
+    private static FormUrlEncodedContent CreateInvalidClientTokenRequest() =>
+        new(new[]
         {
-            await _client.PostAsync("/connect/token", tokenContent);
-        }
-
-        // Token 端点应该被限制
-        var tokenResponse = await _client.PostAsync("/connect/token", tokenContent);
-
-        // 但其他端点应该仍然可以访问
-        var discoveryResponse = await _client.GetAsync("/.well-known/openid-configuration");
-
-        // Assert
-        Assert.Equal(HttpStatusCode.TooManyRequests, tokenResponse.StatusCode);
-        Assert.Equal(HttpStatusCode.OK, discoveryResponse.StatusCode);
-    }
+            new KeyValuePair<string, string>("grant_type", "client_credentials"),
+            new KeyValuePair<string, string>("client_id", "invalid-client"),
+            new KeyValuePair<string, string>("client_secret", "wrong-secret"),
+            new KeyValuePair<string, string>("scope", "api1")
+        });
 }

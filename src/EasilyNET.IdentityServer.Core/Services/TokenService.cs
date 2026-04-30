@@ -6,6 +6,7 @@ using System.Collections.Concurrent;
 using EasilyNET.IdentityServer.Abstractions.Extensions;
 using EasilyNET.IdentityServer.Abstractions.Models;
 using EasilyNET.IdentityServer.Abstractions.Services;
+using EasilyNET.IdentityServer.Abstractions.Stores;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
@@ -24,6 +25,8 @@ public class TokenService : ITokenService, IDisposable
     private readonly ConcurrentDictionary<string, DateTime> _revokedTokens = new(StringComparer.Ordinal);
     private readonly ISerializationService _serialization;
     private readonly ISigningService _signingService;
+    private readonly IPersistedGrantStore? _grantStore;
+    private readonly IResourceStore? _resourceStore;
     private readonly Timer _cleanupTimer;
     private bool _disposed;
 
@@ -34,12 +37,16 @@ public class TokenService : ITokenService, IDisposable
         IOptions<IdentityServerOptions> options,
         ILogger<TokenService> logger,
         ISerializationService serialization,
-        ISigningService signingService)
+        ISigningService signingService,
+        IPersistedGrantStore? grantStore = null,
+        IResourceStore? resourceStore = null)
     {
         _options = options.Value;
         _logger = logger;
         _serialization = serialization;
         _signingService = signingService;
+        _grantStore = grantStore;
+        _resourceStore = resourceStore;
 
         // 每小时清理过期的撤销记录
         _cleanupTimer = new Timer(
@@ -89,14 +96,17 @@ public class TokenService : ITokenService, IDisposable
         // 构建 access token 的受众声明 (aud)
         // OAuth 2.1: aud 应该是接收该 token 的资源服务器的标识符
         // 通常是 API 资源或 issuer 本身
-        var audience = string.Join(" ", scopes);
+        var audiences = await ResolveAudiencesAsync(scopes, cancellationToken);
+        foreach (var audience in audiences)
+        {
+            claims.Add(new(JwtRegisteredClaimNames.Aud, audience));
+        }
         var tokenDescriptor = new SecurityTokenDescriptor
         {
             Subject = new(claims),
             IssuedAt = now,
             Expires = expires,
             Issuer = _options.Issuer,
-            Audience = audience,
             SigningCredentials = signingKey.Credentials
         };
         var tokenHandler = new JwtSecurityTokenHandler();
@@ -201,7 +211,9 @@ public class TokenService : ITokenService, IDisposable
     {
         try
         {
-            if (_revokedTokens.ContainsKey(token))
+            var revocationKey = GetRevocationKey(token);
+            if (_revokedTokens.ContainsKey(revocationKey) ||
+                _grantStore != null && await _grantStore.GetAsync(revocationKey, cancellationToken) is { Type: "revoked_access_token" })
             {
                 return new()
                 {
@@ -226,6 +238,19 @@ public class TokenService : ITokenService, IDisposable
             };
             var principal = tokenHandler.ValidateToken(token, preliminaryParameters, out var validatedToken);
             var scopes = principal.FindAll("scope").Select(x => x.Value).Distinct(StringComparer.Ordinal).ToArray();
+            var audiences = principal.FindAll(JwtRegisteredClaimNames.Aud)
+                                     .Select(x => x.Value)
+                                     .Distinct(StringComparer.Ordinal)
+                                     .ToArray();
+            if (audiences.Length == 0)
+            {
+                return new()
+                {
+                    IsValid = false,
+                    Error = "invalid_token",
+                    ErrorDescription = "Token audience is missing"
+                };
+            }
 
             // 第二步：用解析出的 scopes 作为 audience 进行完整验证
             var validationParameters = new TokenValidationParameters
@@ -235,7 +260,7 @@ public class TokenService : ITokenService, IDisposable
                 ValidateIssuer = true,
                 ValidIssuer = _options.Issuer,
                 ValidateAudience = true,
-                ValidAudience = string.Join(" ", scopes),
+                ValidAudiences = audiences,
                 ValidateLifetime = true,
                 ClockSkew = TimeSpan.Zero
             };
@@ -270,8 +295,55 @@ public class TokenService : ITokenService, IDisposable
     /// <inheritdoc />
     public Task RevokeAsync(string token, CancellationToken cancellationToken = default)
     {
-        _revokedTokens[token] = DateTime.UtcNow;
-        return Task.CompletedTask;
+        var key = GetRevocationKey(token);
+        _revokedTokens[key] = DateTime.UtcNow;
+        if (_grantStore == null)
+        {
+            return Task.CompletedTask;
+        }
+
+        DateTime? expiration = null;
+        try
+        {
+            var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
+            expiration = jwt.ValidTo == DateTime.MinValue ? null : jwt.ValidTo;
+        }
+        catch
+        {
+            // Revocation endpoint must be idempotent even for malformed tokens.
+        }
+
+        return _grantStore.StoreAsync(new()
+        {
+            Key = key,
+            Type = "revoked_access_token",
+            ClientId = "unknown",
+            CreationTime = DateTime.UtcNow,
+            ExpirationTime = expiration,
+            Data = string.Empty
+        }, cancellationToken);
+    }
+
+    private async Task<IReadOnlyCollection<string>> ResolveAudiencesAsync(IEnumerable<string> scopes, CancellationToken cancellationToken)
+    {
+        if (_resourceStore == null)
+        {
+            return scopes.Distinct(StringComparer.Ordinal).ToArray();
+        }
+        var resources = await _resourceStore.FindApiResourcesByScopeAsync(scopes, cancellationToken);
+        var audiences = resources.Select(r => r.Name).Distinct(StringComparer.Ordinal).ToArray();
+        return audiences.Length > 0
+            ? audiences
+            : scopes.Distinct(StringComparer.Ordinal).ToArray();
+    }
+
+    private static string GetRevocationKey(string token)
+    {
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(token));
+        return "revoked_access_token:" + Convert.ToBase64String(hash)
+                                                 .TrimEnd('=')
+                                                 .Replace('+', '-')
+                                                 .Replace('/', '_');
     }
 
     private static bool ShouldIssueRefreshToken(TokenRequest request) =>

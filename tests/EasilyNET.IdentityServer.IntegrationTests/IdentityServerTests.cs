@@ -2,7 +2,10 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Security.Cryptography;
+using EasilyNET.IdentityServer.Abstractions.Services;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace EasilyNET.IdentityServer.IntegrationTests;
 
@@ -21,7 +24,15 @@ public class IdentityServerTests
     public void Setup()
     {
         var factory = new WebApplicationFactory<Program>()
-            .WithWebHostBuilder(builder => builder.UseSetting("ASPNETCORE_ENVIRONMENT", "Development"));
+            .WithWebHostBuilder(builder =>
+            {
+                builder.UseSetting("ASPNETCORE_ENVIRONMENT", "Development");
+                builder.ConfigureServices(services =>
+                {
+                    services.RemoveAll<ISigningService>();
+                    services.AddSingleton<ISigningService, TestSigningService>();
+                });
+            });
         _client = factory.CreateClient(new WebApplicationFactoryClientOptions
         {
             AllowAutoRedirect = false
@@ -317,6 +328,7 @@ public class IdentityServerTests
             ["client_id"] = "mvc",
             ["client_secret"] = "secret",
             ["code"] = code!,
+            ["redirect_uri"] = "https://localhost:5002/signin-oidc",
             ["code_verifier"] = verifier
         }));
 
@@ -361,6 +373,7 @@ public class IdentityServerTests
             ["client_id"] = "mvc",
             ["client_secret"] = "secret",
             ["code"] = query["code"]!,
+            ["redirect_uri"] = "https://localhost:5002/signin-oidc",
             ["code_verifier"] = "wrong-verifier"
         }));
 
@@ -402,6 +415,7 @@ public class IdentityServerTests
             ["client_id"] = "mvc",
             ["client_secret"] = "secret",
             ["code"] = query["code"]!,
+            ["redirect_uri"] = "https://localhost:5002/signin-oidc",
             ["code_verifier"] = verifier
         }));
         exchangeResponse.EnsureSuccessStatusCode();
@@ -447,6 +461,7 @@ public class IdentityServerTests
             ["client_id"] = "mvc",
             ["client_secret"] = "secret",
             ["code"] = query["code"]!,
+            ["redirect_uri"] = "https://localhost:5002/signin-oidc",
             ["code_verifier"] = verifier
         }));
         exchangeResponse.EnsureSuccessStatusCode();
@@ -484,6 +499,7 @@ public class IdentityServerTests
             ["client_id"] = "mvc",
             ["client_secret"] = "secret",
             ["code"] = query["code"]!,
+            ["redirect_uri"] = "https://localhost:5002/signin-oidc",
             ["code_verifier"] = verifier
         }));
         exchangeResponse.EnsureSuccessStatusCode();

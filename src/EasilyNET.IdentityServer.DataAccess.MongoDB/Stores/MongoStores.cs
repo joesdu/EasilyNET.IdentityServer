@@ -151,7 +151,8 @@ public class MongoDeviceFlowStore(IMongoDatabase database) : IDeviceFlowStore
 
     public async Task StoreAsync(DeviceCodeData deviceCode, CancellationToken cancellationToken = default)
     {
-        await Collection.InsertOneAsync(deviceCode, cancellationToken: cancellationToken);
+        var filter = Builders<DeviceCodeData>.Filter.Eq(d => d.Code, deviceCode.Code);
+        await Collection.ReplaceOneAsync(filter, deviceCode, new ReplaceOptions { IsUpsert = true }, cancellationToken);
     }
 
     public async Task<DeviceCodeData?> FindByDeviceCodeAsync(string deviceCode, CancellationToken cancellationToken = default)
@@ -205,5 +206,45 @@ public class MongoUserConsentStore(IMongoDatabase database) : IUserConsentStore
     public async Task RemoveAllAsync(string subjectId, CancellationToken cancellationToken = default)
     {
         await Collection.DeleteManyAsync(c => c.SubjectId == subjectId, cancellationToken);
+    }
+}
+
+/// <summary>
+/// MongoDB 签名密钥存储
+/// </summary>
+public class MongoSigningKeyStore(IMongoDatabase database) : ISigningKeyStore
+{
+    private IMongoCollection<SigningKey> Collection => database.GetCollection<SigningKey>("signingKeys");
+
+    public async Task<IEnumerable<SigningKey>> GetAllKeysAsync(CancellationToken cancellationToken = default)
+    {
+        return await Collection.Find(Builders<SigningKey>.Filter.Empty)
+                               .SortByDescending(k => k.CreatedAt)
+                               .ToListAsync(cancellationToken);
+    }
+
+    public async Task<SigningKey?> GetActiveKeyAsync(CancellationToken cancellationToken = default)
+    {
+        return await Collection.Find(k => k.DisabledAt == null)
+                               .SortByDescending(k => k.CreatedAt)
+                               .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    public async Task StoreKeyAsync(SigningKey key, CancellationToken cancellationToken = default)
+    {
+        var filter = Builders<SigningKey>.Filter.Eq(k => k.KeyId, key.KeyId);
+        await Collection.ReplaceOneAsync(filter, key, new ReplaceOptions { IsUpsert = true }, cancellationToken);
+    }
+
+    public async Task DisableKeyAsync(string keyId, CancellationToken cancellationToken = default)
+    {
+        var filter = Builders<SigningKey>.Filter.Eq(k => k.KeyId, keyId);
+        var update = Builders<SigningKey>.Update.Set(k => k.DisabledAt, DateTime.UtcNow);
+        await Collection.UpdateOneAsync(filter, update, cancellationToken: cancellationToken);
+    }
+
+    public async Task RemoveExpiredKeysAsync(DateTime cutoff, CancellationToken cancellationToken = default)
+    {
+        await Collection.DeleteManyAsync(k => k.DisabledAt != null && k.DisabledAt < cutoff, cancellationToken);
     }
 }

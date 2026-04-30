@@ -72,9 +72,8 @@ public class AuthorizationService : IAuthorizationService
             };
         }
 
-        // 严格匹配 redirect_uri (OAuth 2.1 要求 RFC 3986 Section 6.2.1)
-        // OAuth 2.1 明确要求精确字符串匹配，不允许重定向URI注册为前缀或模式匹配
-        // 但对于 localhost，应允许端口变化 (开发场景)
+        // OAuth 2.1 要求精确字符串匹配。唯一例外是原生应用回环 IP 重定向 URI，
+        // 规范要求授权服务器允许请求时使用任意端口。
         if (!ValidateRedirectUri(client.RedirectUris, request.RedirectUri))
         {
             return new()
@@ -205,11 +204,10 @@ public class AuthorizationService : IAuthorizationService
     }
 
     /// <summary>
-    /// 验证 redirect_uri，支持 localhost 端口可变逻辑
+    /// 验证 redirect_uri，支持回环 IP 重定向 URI 的端口可变逻辑
     /// </summary>
     /// <remarks>
-    /// OAuth 2.1 规范要求精确字符串匹配，但对于 http://localhost 的 redirect_uri，
-    /// 允许端口变化以支持开发场景。
+    /// OAuth 2.1 规范要求精确字符串匹配；原生应用回环 IP 重定向 URI 可在请求时使用任意端口。
     /// </remarks>
     private static bool ValidateRedirectUri(IEnumerable<string> registeredUris, string requestedUri)
     {
@@ -219,40 +217,34 @@ public class AuthorizationService : IAuthorizationService
             return true;
         }
 
-        // 对于 localhost，允许端口变化
-        if (IsLocalhostWithVariablePort(requestedUri))
+        if (IsLoopbackIpRedirectUri(requestedUri, out var requestedUriWithoutPort))
         {
-            var requestedUriWithoutPort = GetLocalhostBase(requestedUri);
-            return registeredUris.Any(uri => IsLocalhostWithVariablePort(uri) &&
-                                              string.Equals(GetLocalhostBase(uri), requestedUriWithoutPort, StringComparison.OrdinalIgnoreCase));
+            return registeredUris.Any(uri =>
+                IsLoopbackIpRedirectUri(uri, out var registeredUriWithoutPort) &&
+                string.Equals(registeredUriWithoutPort, requestedUriWithoutPort, StringComparison.Ordinal));
         }
 
         return false;
     }
 
     /// <summary>
-    /// 检查 URI 是否为 localhost 且端口可变
+    /// 检查 URI 是否为允许端口可变的回环 IP 重定向 URI
     /// </summary>
-    private static bool IsLocalhostWithVariablePort(string uri)
+    private static bool IsLoopbackIpRedirectUri(string uri, out string uriWithoutPort)
     {
+        uriWithoutPort = string.Empty;
         if (!Uri.TryCreate(uri, UriKind.Absolute, out var parsedUri))
             return false;
 
-        // 检查是否为 http://localhost 或 https://localhost
-        return (parsedUri.Scheme == "http" || parsedUri.Scheme == "https") &&
-               (parsedUri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
-                parsedUri.Host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
-                parsedUri.Host.Equals("::1", StringComparison.OrdinalIgnoreCase));
-    }
+        if (parsedUri.Scheme != "http" ||
+            !System.Net.IPAddress.TryParse(parsedUri.Host, out var address) ||
+            !System.Net.IPAddress.IsLoopback(address))
+        {
+            return false;
+        }
 
-    /// <summary>
-    /// 获取 localhost URI 的基础部分（不含端口）
-    /// </summary>
-    private static string GetLocalhostBase(string uri)
-    {
-        if (!Uri.TryCreate(uri, UriKind.Absolute, out var parsedUri))
-            return uri;
-
-        return $"{parsedUri.Scheme}://{parsedUri.Host}";
+        var builder = new UriBuilder(parsedUri) { Port = -1 };
+        uriWithoutPort = builder.Uri.AbsoluteUri;
+        return true;
     }
 }

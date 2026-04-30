@@ -131,17 +131,36 @@ public class EfDeviceFlowStore(IdentityServerDbContext db) : IDeviceFlowStore
 {
     public async Task StoreAsync(DeviceCodeData deviceCode, CancellationToken cancellationToken = default)
     {
-        db.DeviceCodes.Add(new()
+        var entity = await db.DeviceCodes.FirstOrDefaultAsync(d => d.DeviceCode == deviceCode.Code, cancellationToken);
+        var propertiesJson = deviceCode.Properties.Count > 0
+            ? JsonSerializer.Serialize(deviceCode.Properties)
+            : null;
+        if (entity != null)
         {
-            DeviceCode = deviceCode.Code,
-            UserCode = deviceCode.UserCode,
-            SubjectId = deviceCode.SubjectId,
-            ClientId = deviceCode.ClientId,
-            Description = deviceCode.Description,
-            CreationTime = deviceCode.CreationTime,
-            ExpirationTime = deviceCode.ExpirationTime,
-            Data = deviceCode.Data
-        });
+            entity.UserCode = deviceCode.UserCode;
+            entity.SubjectId = deviceCode.SubjectId;
+            entity.ClientId = deviceCode.ClientId;
+            entity.Description = deviceCode.Description;
+            entity.CreationTime = deviceCode.CreationTime;
+            entity.ExpirationTime = deviceCode.ExpirationTime;
+            entity.Data = deviceCode.Data;
+            entity.PropertiesJson = propertiesJson;
+        }
+        else
+        {
+            db.DeviceCodes.Add(new()
+            {
+                DeviceCode = deviceCode.Code,
+                UserCode = deviceCode.UserCode,
+                SubjectId = deviceCode.SubjectId,
+                ClientId = deviceCode.ClientId,
+                Description = deviceCode.Description,
+                CreationTime = deviceCode.CreationTime,
+                ExpirationTime = deviceCode.ExpirationTime,
+                Data = deviceCode.Data,
+                PropertiesJson = propertiesJson
+            });
+        }
         await db.SaveChangesAsync(cancellationToken);
     }
 
@@ -183,7 +202,11 @@ public class EfDeviceFlowStore(IdentityServerDbContext db) : IDeviceFlowStore
         {
             Code = e.DeviceCode, UserCode = e.UserCode, SubjectId = e.SubjectId,
             ClientId = e.ClientId, Description = e.Description,
-            CreationTime = e.CreationTime, ExpirationTime = e.ExpirationTime, Data = e.Data
+            CreationTime = e.CreationTime, ExpirationTime = e.ExpirationTime, Data = e.Data,
+            Properties = string.IsNullOrEmpty(e.PropertiesJson)
+                ? new Dictionary<string, string>()
+                : JsonSerializer.Deserialize<Dictionary<string, string>>(e.PropertiesJson)
+                  ?? new Dictionary<string, string>()
         };
 }
 

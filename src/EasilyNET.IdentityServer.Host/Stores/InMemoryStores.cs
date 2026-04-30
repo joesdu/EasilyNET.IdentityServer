@@ -192,8 +192,8 @@ public class InMemoryPersistedGrantStore : IPersistedGrantStore
         lock (_lock)
         {
             _grants.TryGetValue(key, out var grant);
-            // 过滤掉已消费的授权码
-            if (grant != null && grant.ConsumedTime.HasValue)
+            // 授权码只能消费一次；刷新令牌重放检测需要能读取已消费标记。
+            if (grant is { Type: GrantType.AuthorizationCode } && grant.ConsumedTime.HasValue)
             {
                 return Task.FromResult<PersistedGrant?>(null);
             }
@@ -248,6 +248,55 @@ public class InMemoryPersistedGrantStore : IPersistedGrantStore
         }
         return Task.CompletedTask;
     }
+}
+
+/// <summary>
+/// 内存用户同意存储 (开发环境使用)
+/// </summary>
+public class InMemoryUserConsentStore : IUserConsentStore
+{
+    private readonly ConcurrentDictionary<string, UserConsent> _consents = new();
+
+    public Task StoreAsync(UserConsent consent, CancellationToken cancellationToken = default)
+    {
+        _consents[BuildKey(consent.SubjectId, consent.ClientId)] = consent;
+        return Task.CompletedTask;
+    }
+
+    public Task<UserConsent?> GetAsync(string subjectId, string clientId, CancellationToken cancellationToken = default)
+    {
+        if (!_consents.TryGetValue(BuildKey(subjectId, clientId), out var consent))
+        {
+            return Task.FromResult<UserConsent?>(null);
+        }
+
+        if (consent.ExpirationTime.HasValue && consent.ExpirationTime.Value <= DateTime.UtcNow)
+        {
+            _consents.TryRemove(BuildKey(subjectId, clientId), out _);
+            return Task.FromResult<UserConsent?>(null);
+        }
+
+        return Task.FromResult<UserConsent?>(consent);
+    }
+
+    public Task RemoveAsync(string subjectId, string clientId, CancellationToken cancellationToken = default)
+    {
+        _consents.TryRemove(BuildKey(subjectId, clientId), out _);
+        return Task.CompletedTask;
+    }
+
+    public Task RemoveAllAsync(string subjectId, CancellationToken cancellationToken = default)
+    {
+        var prefix = subjectId + ":";
+        foreach (var key in _consents.Keys.Where(k => k.StartsWith(prefix, StringComparison.Ordinal)).ToArray())
+        {
+            _consents.TryRemove(key, out _);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private static string BuildKey(string subjectId, string clientId) => subjectId + ":" + clientId;
 }
 
 /// <summary>

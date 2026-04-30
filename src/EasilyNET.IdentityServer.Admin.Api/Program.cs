@@ -1,5 +1,6 @@
 using EasilyNET.IdentityServer.DataAccess.EFCore;
 using EasilyNET.IdentityServer.DataAccess.EFCore.Sqlite.Extensions;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
@@ -22,11 +23,11 @@ builder.Services.AddCors(options =>
 });
 var app = builder.Build();
 
-// 自动创建数据库
+// 使用迁移演进数据库架构，避免 EnsureCreated 绕过 migrations。
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<IdentityServerDbContext>();
-    await db.Database.EnsureCreatedAsync();
+    await db.Database.MigrateAsync();
 }
 if (app.Environment.IsDevelopment())
 {

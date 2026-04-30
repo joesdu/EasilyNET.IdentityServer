@@ -58,6 +58,11 @@ public class DeviceCodeEntity
 
     public int Id { get; set; }
 
+    /// <summary>
+    /// 额外属性的JSON序列化
+    /// </summary>
+    public string? PropertiesJson { get; set; }
+
     public string? SubjectId { get; set; }
 
     public required string UserCode { get; set; }

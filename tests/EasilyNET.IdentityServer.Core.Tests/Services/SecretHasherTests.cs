@@ -1,16 +1,17 @@
 using System;
 using System.Text;
 using EasilyNET.IdentityServer.Core.Services;
-using Xunit;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace EasilyNET.IdentityServer.Core.Tests.Services;
 
 /// <summary>
 /// 密钥哈希工具测试
 /// </summary>
+[TestClass]
 public class SecretHasherTests
 {
-    [Fact]
+    [TestMethod]
     public void HashSecret_SameInput_ShouldReturnSameHash()
     {
         // Arrange
@@ -21,10 +22,10 @@ public class SecretHasherTests
         var hash2 = SecretHasher.HashSecret(secret);
 
         // Assert
-        Assert.Equal(hash1, hash2);
+        Assert.AreEqual(hash1, hash2);
     }
 
-    [Fact]
+    [TestMethod]
     public void HashSecret_DifferentInput_ShouldReturnDifferentHash()
     {
         // Arrange
@@ -36,10 +37,10 @@ public class SecretHasherTests
         var hash2 = SecretHasher.HashSecret(secret2);
 
         // Assert
-        Assert.NotEqual(hash1, hash2);
+        Assert.AreNotEqual(hash1, hash2);
     }
 
-    [Fact]
+    [TestMethod]
     public void HashSecret_EmptyString_ShouldReturnHash()
     {
         // Arrange
@@ -49,11 +50,11 @@ public class SecretHasherTests
         var hash = SecretHasher.HashSecret(secret);
 
         // Assert
-        Assert.NotNull(hash);
-        Assert.NotEmpty(hash);
+        Assert.IsNotNull(hash);
+        Assert.IsFalse(string.IsNullOrEmpty(hash));
     }
 
-    [Fact]
+    [TestMethod]
     public void VerifySecret_CorrectSecret_ShouldReturnTrue()
     {
         // Arrange
@@ -64,10 +65,10 @@ public class SecretHasherTests
         var result = SecretHasher.VerifySecret(secret, hashedSecret);
 
         // Assert
-        Assert.True(result);
+        Assert.IsTrue(result);
     }
 
-    [Fact]
+    [TestMethod]
     public void VerifySecret_WrongSecret_ShouldReturnFalse()
     {
         // Arrange
@@ -79,10 +80,10 @@ public class SecretHasherTests
         var result = SecretHasher.VerifySecret(wrongSecret, hashedSecret);
 
         // Assert
-        Assert.False(result);
+        Assert.IsFalse(result);
     }
 
-    [Fact]
+    [TestMethod]
     public void VerifySecret_SameLengthDifferentContent_ShouldReturnFalse()
     {
         // Arrange
@@ -94,29 +95,29 @@ public class SecretHasherTests
         var result = SecretHasher.VerifySecret(secret2, hashedSecret);
 
         // Assert
-        Assert.False(result);
+        Assert.IsFalse(result);
     }
 
-    [Theory]
-    [InlineData("short")]
-    [InlineData("a-very-long-secret-value-that-exceeds-normal-lengths-and-contains-special-chars-!@#$%^&*()")]
-    [InlineData("Unicode: 中文测试 🎉")]
-    [InlineData("null\x00char")]
+    [DataTestMethod]
+    [DataRow("short")]
+    [DataRow("a-very-long-secret-value-that-exceeds-normal-lengths-and-contains-special-chars-!@#$%^&*()")]
+    [DataRow("Unicode: 中文测试 🎉")]
+    [DataRow("null\x00char")]
     public void HashSecret_VariousInputs_ShouldWork(string secret)
     {
         // Act
         var hash = SecretHasher.HashSecret(secret);
 
         // Assert
-        Assert.NotNull(hash);
-        Assert.NotEmpty(hash);
+        Assert.IsNotNull(hash);
+        Assert.IsFalse(string.IsNullOrEmpty(hash));
 
         // 验证可以正确验证
         var result = SecretHasher.VerifySecret(secret, hash);
-        Assert.True(result);
+        Assert.IsTrue(result);
     }
 
-    [Fact]
+    [TestMethod]
     public void VerifySecret_TimingAttackResistance_ShouldTakeSimilarTime()
     {
         // Arrange
@@ -147,10 +148,10 @@ public class SecretHasherTests
 
         // Assert - 时间应该相近（差异在20%以内）
         var ratio = Math.Max(avgCorrectTime, avgWrongTime) / (double)Math.Min(avgCorrectTime, avgWrongTime);
-        Assert.True(ratio < 1.5, $"Timing difference too large: {ratio:F2}x");
+        Assert.IsTrue(ratio < 1.5, $"Timing difference too large: {ratio:F2}x");
     }
 
-    [Fact]
+    [TestMethod]
     public void HashSecret_OutputShouldBeBase64()
     {
         // Arrange
@@ -161,10 +162,10 @@ public class SecretHasherTests
 
         // Assert - 应该是有效的 Base64
         var bytes = Convert.FromBase64String(hash);
-        Assert.Equal(32, bytes.Length); // SHA-256 = 32 bytes
+        Assert.AreEqual(32, bytes.Length); // SHA-256 = 32 bytes
     }
 
-    [Fact]
+    [TestMethod]
     public void VerifySecret_CaseSensitivity_ShouldBeCaseSensitive()
     {
         // Arrange
@@ -176,6 +177,6 @@ public class SecretHasherTests
         var result = SecretHasher.VerifySecret(differentCaseSecret, hashedSecret);
 
         // Assert
-        Assert.False(result);
+        Assert.IsFalse(result);
     }
 }

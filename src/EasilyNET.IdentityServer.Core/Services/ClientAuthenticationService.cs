@@ -66,6 +66,16 @@ public class ClientAuthenticationService : IClientAuthenticationService
                 ErrorDescription = "Grant type not allowed for this client"
             };
         }
+        if (normalizedGrantType == GrantType.ClientCredentials && client.ClientType != ClientType.Confidential)
+        {
+            _logger.LogWarning("Public client attempted to use client_credentials: {ClientId}", request.ClientId);
+            return new()
+            {
+                IsSuccess = false,
+                Error = "unauthorized_client",
+                ErrorDescription = "client_credentials grant requires a confidential client"
+            };
+        }
 
         // 验证客户端 Secret (仅对机密客户端)
         if (client.ClientType == ClientType.Confidential)

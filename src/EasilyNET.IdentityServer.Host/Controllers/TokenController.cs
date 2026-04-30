@@ -16,6 +16,8 @@ namespace EasilyNET.IdentityServer.Host.Controllers;
 [ApiController]
 public class TokenController : ControllerBase
 {
+    private const string ConsumedRefreshTokenType = "consumed_refresh_token";
+    private const string RefreshTokenType = "refresh_token";
     private readonly IAuditService _auditService;
     private readonly IClientAuthenticationService _clientAuth;
     private readonly IDeviceFlowStore _deviceFlowStore;
@@ -48,6 +50,7 @@ public class TokenController : ControllerBase
     [HttpPost("/connect/token")]
     public async Task<IActionResult> Token(CancellationToken cancellationToken)
     {
+        SetSensitiveResponseHeaders();
         var form = await Request.ReadFormAsync(cancellationToken);
         var grantType = form["grant_type"].ToString();
         if (string.IsNullOrEmpty(grantType))
@@ -82,7 +85,6 @@ public class TokenController : ControllerBase
             "urn:ietf:params:oauth:grant-type:device_code" => await HandleDeviceCode(client, form, cancellationToken),
             _                                              => BadRequest(new TokenErrorResponse("unsupported_grant_type", $"Grant type '{grantType}' is not supported"))
         };
-        SetSensitiveResponseHeaders();
         return result;
     }
 
@@ -246,7 +248,12 @@ public class TokenController : ControllerBase
             return BadRequest(new TokenErrorResponse("invalid_request", "refresh_token is required"));
         }
         var grant = await _grantStore.GetAsync(refreshToken, ct);
-        if (grant == null || grant.Type != "refresh_token" || grant.ClientId != client.ClientId)
+        if (grant?.Type == ConsumedRefreshTokenType && grant.ClientId == client.ClientId)
+        {
+            await RevokeRefreshTokenFamilyAsync(grant, ct);
+            return BadRequest(new TokenErrorResponse("invalid_grant", "Refresh token reuse detected"));
+        }
+        if (grant == null || grant.Type != RefreshTokenType || grant.ClientId != client.ClientId)
         {
             return BadRequest(new TokenErrorResponse("invalid_grant", "Invalid refresh token"));
         }
@@ -280,8 +287,8 @@ public class TokenController : ControllerBase
         var isPublicClient = client.ClientType == ClientType.Public || !client.RequireClientSecret;
         if (isPublicClient)
         {
-            // 公开客户端：删除旧刷新令牌但不颁发新的（一次性刷新令牌）
-            await _grantStore.RemoveAsync(refreshToken, ct);
+            // 公开客户端：使用一次性刷新令牌，旧令牌会留下已消费标记用于重放检测
+            await MarkRefreshTokenConsumedAsync(grant, ct);
             var nonce = grant.Properties.TryGetValue("nonce", out var n) ? n : null;
             var result = await _tokenService.CreateAccessTokenAsync(new()
             {
@@ -297,13 +304,13 @@ public class TokenController : ControllerBase
             await _auditService.LogTokenIssuedAsync(client.ClientId, grant.SubjectId, GrantType.RefreshToken,
                 scopes, GetClientIpAddress(), ct);
 
-            // 返回不包含 refresh_token 的响应
-            return Ok(new PublicClientTokenResponse(result));
+            await StoreRefreshTokenGrantAsync(client, grant.SubjectId, scopes, result, nonce, ct, GetRefreshTokenFamilyId(grant));
+            return Ok(new TokenSuccessResponse(result));
         }
 
         // 机密客户端：使用标准滑动窗口刷新令牌（轮换机制）
         // Refresh Token 轮换 (OAuth 2.1 要求)
-        await _grantStore.RemoveAsync(refreshToken, ct);
+        await MarkRefreshTokenConsumedAsync(grant, ct);
         var refreshNonce = grant.Properties.TryGetValue("nonce", out var rn) ? rn : null;
         var tokenResult = await _tokenService.CreateAccessTokenAsync(new()
         {
@@ -315,7 +322,7 @@ public class TokenController : ControllerBase
         }, ct);
 
         // 存储新的 Refresh Token
-        await StoreRefreshTokenGrantAsync(client, grant.SubjectId, scopes, tokenResult, refreshNonce, ct);
+        await StoreRefreshTokenGrantAsync(client, grant.SubjectId, scopes, tokenResult, refreshNonce, ct, GetRefreshTokenFamilyId(grant));
 
         // 记录审计日志
         await _auditService.LogRefreshTokenUsedAsync(client.ClientId, grant.SubjectId, true, GetClientIpAddress(), ct);
@@ -462,15 +469,17 @@ public class TokenController : ControllerBase
             : DeviceAuthorizationController.DefaultPollingIntervalSeconds;
     }
 
-    private Task StoreRefreshTokenGrantAsync(Client client, string? subjectId, IEnumerable<string> scopes, TokenResult result, string? nonce, CancellationToken ct)
+    private Task StoreRefreshTokenGrantAsync(Client client, string? subjectId, IEnumerable<string> scopes, TokenResult result, string? nonce, CancellationToken ct, string? familyId = null)
     {
         if (string.IsNullOrEmpty(result.RefreshToken))
         {
             return Task.CompletedTask;
         }
+        familyId ??= Guid.NewGuid().ToString("N");
         var properties = new Dictionary<string, string>
         {
-            ["scope"] = string.Join(" ", scopes)
+            ["scope"] = string.Join(" ", scopes),
+            ["family_id"] = familyId
         };
         if (!string.IsNullOrEmpty(nonce))
         {
@@ -479,7 +488,7 @@ public class TokenController : ControllerBase
         return _grantStore.StoreAsync(new()
         {
             Key = result.RefreshToken,
-            Type = "refresh_token",
+            Type = RefreshTokenType,
             ClientId = client.ClientId,
             SubjectId = subjectId,
             CreationTime = DateTime.UtcNow,
@@ -489,18 +498,67 @@ public class TokenController : ControllerBase
         }, ct);
     }
 
+    private async Task MarkRefreshTokenConsumedAsync(PersistedGrant grant, CancellationToken ct)
+    {
+        await _grantStore.StoreAsync(new()
+        {
+            Key = grant.Key,
+            Type = ConsumedRefreshTokenType,
+            SubjectId = grant.SubjectId,
+            ClientId = grant.ClientId,
+            SessionId = grant.SessionId,
+            Description = grant.Description,
+            CreationTime = grant.CreationTime,
+            ExpirationTime = grant.ExpirationTime,
+            ConsumedTime = DateTime.UtcNow,
+            Data = grant.Data,
+            Properties = grant.Properties
+        }, ct);
+    }
+
+    private async Task RevokeRefreshTokenFamilyAsync(PersistedGrant reusedGrant, CancellationToken ct)
+    {
+        var familyId = GetRefreshTokenFamilyId(reusedGrant);
+        if (string.IsNullOrEmpty(familyId))
+        {
+            return;
+        }
+        var activeGrants = await _grantStore.GetAllAsync(new()
+        {
+            ClientId = reusedGrant.ClientId,
+            SubjectId = reusedGrant.SubjectId,
+            Type = RefreshTokenType
+        }, ct);
+        foreach (var grant in activeGrants.Where(g =>
+                     g.Properties.TryGetValue("family_id", out var value) &&
+                     string.Equals(value, familyId, StringComparison.Ordinal)))
+        {
+            await _grantStore.RemoveAsync(grant.Key, ct);
+        }
+    }
+
+    private static string? GetRefreshTokenFamilyId(PersistedGrant grant) =>
+        grant.Properties.TryGetValue("family_id", out var familyId) ? familyId : null;
+
     private (string? clientId, string? clientSecret) ExtractClientCredentials(IFormCollection form)
     {
         // 优先从 Authorization header 提取 (Basic Auth)
         var authHeader = Request.Headers.Authorization.ToString();
         if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
         {
-            var encoded = authHeader["Basic ".Length..].Trim();
-            var decoded = Encoding.UTF8.GetString(Convert.FromBase64String(encoded));
-            var parts = decoded.Split(':', 2);
-            if (parts.Length == 2)
+            try
             {
-                return (Uri.UnescapeDataString(parts[0]), Uri.UnescapeDataString(parts[1]));
+                var encoded = authHeader["Basic ".Length..].Trim();
+                var decoded = Encoding.UTF8.GetString(Convert.FromBase64String(encoded));
+                var parts = decoded.Split(':', 2);
+                if (parts.Length == 2)
+                {
+                    return (Uri.UnescapeDataString(parts[0]), Uri.UnescapeDataString(parts[1]));
+                }
+            }
+            catch
+            {
+                return (null, null);
             }
         }
 

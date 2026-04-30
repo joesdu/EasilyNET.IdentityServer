@@ -13,14 +13,17 @@ namespace EasilyNET.IdentityServer.Host.Controllers;
 public class AuthorizeController : ControllerBase
 {
     private readonly IAuthorizationService _authorizationService;
+    private readonly IUserConsentStore? _consentStore;
     private readonly IdentityServerOptions _options;
 
     public AuthorizeController(
         IAuthorizationService authorizationService,
-        IdentityServerOptions options)
+        IdentityServerOptions options,
+        IUserConsentStore? consentStore = null)
     {
         _authorizationService = authorizationService;
         _options = options;
+        _consentStore = consentStore;
     }
 
     /// <summary>
@@ -150,8 +153,17 @@ public class AuthorizeController : ControllerBase
         }
 
         // 检查是否需要 consent (prompt=consent 强制要求)
-        var needsConsent = client.RequireConsent || (prompt?.Contains("consent") ?? false);
-        // 注意: 实际实现应该检查用户是否已经同意了所有请求的 scopes
+        var prompts = SplitPrompt(prompt);
+        var forceConsent = prompts.Contains("consent", StringComparer.Ordinal);
+        var consentAccepted = string.Equals(Request.Query["consent"], "accept", StringComparison.OrdinalIgnoreCase);
+        var existingConsent = _consentStore == null ? null : await _consentStore.GetAsync(subjectId, client.ClientId, cancellationToken);
+        var existingScopes = existingConsent?.Scopes.ToHashSet(StringComparer.Ordinal) ?? [];
+        var hasExistingConsent = existingConsent != null && requestedScopes.All(existingScopes.Contains);
+        var needsConsent = forceConsent || (client.RequireConsent && !hasExistingConsent);
+        if (needsConsent && !consentAccepted)
+        {
+            return RedirectWithError(redirect_uri, state, "consent_required", "User consent is required");
+        }
 
         var approval = await _authorizationService.ApproveAuthorizationRequestAsync(new()
         {
@@ -163,7 +175,7 @@ public class AuthorizeController : ControllerBase
             Nonce = nonce,
             CodeChallenge = code_challenge,
             CodeChallengeMethod = code_challenge_method,
-            RememberConsent = false
+            RememberConsent = consentAccepted && client.AllowRememberConsent
         }, cancellationToken);
         if (!approval.IsSuccess || string.IsNullOrEmpty(approval.AuthorizationCode))
         {
@@ -200,4 +212,7 @@ public class AuthorizeController : ControllerBase
     }
 
     private static bool CanRedirectError(string? error) => error is not "invalid_client";
+
+    private static string[] SplitPrompt(string? prompt) =>
+        string.IsNullOrWhiteSpace(prompt) ? [] : prompt.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 }

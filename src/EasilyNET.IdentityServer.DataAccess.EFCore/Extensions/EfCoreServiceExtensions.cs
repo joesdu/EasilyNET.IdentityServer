@@ -21,6 +21,7 @@ public static class EfCoreServiceExtensions
         services.AddScoped<IPersistedGrantStore, EfPersistedGrantStore>();
         services.AddScoped<IDeviceFlowStore, EfDeviceFlowStore>();
         services.AddScoped<IUserConsentStore, EfUserConsentStore>();
+        services.AddScoped<ISigningKeyStore, EfSigningKeyStore>();
         return services;
     }
 }

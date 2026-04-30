@@ -8,13 +8,14 @@ using EasilyNET.IdentityServer.Abstractions.Stores;
 using EasilyNET.IdentityServer.Core.Services;
 using Microsoft.Extensions.Logging;
 using Moq;
-using Xunit;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace EasilyNET.IdentityServer.Core.Tests.Services;
 
 /// <summary>
 /// 审计服务测试
 /// </summary>
+[TestClass]
 public class AuditServiceTests
 {
     private readonly Mock<IAuditLogStore> _auditLogStoreMock;
@@ -28,7 +29,7 @@ public class AuditServiceTests
         _service = new AuditService(_auditLogStoreMock.Object, _loggerMock.Object);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task LogTokenIssuedAsync_ShouldStoreAuditLog()
     {
         // Arrange
@@ -49,15 +50,15 @@ public class AuditServiceTests
 
         // Assert
         _auditLogStoreMock.Verify(x => x.StoreAsync(It.IsAny<AuditLogEntry>(), It.IsAny<CancellationToken>()), Times.Once);
-        Assert.NotNull(capturedEntry);
-        Assert.Equal("token_issued", capturedEntry.EventType);
-        Assert.Equal(clientId, capturedEntry.ClientId);
-        Assert.Equal(subjectId, capturedEntry.SubjectId);
-        Assert.Equal(grantType, capturedEntry.GrantType);
-        Assert.Equal(ipAddress, capturedEntry.IpAddress);
+        Assert.IsNotNull(capturedEntry);
+        Assert.AreEqual("token_issued", capturedEntry.EventType);
+        Assert.AreEqual(clientId, capturedEntry.ClientId);
+        Assert.AreEqual(subjectId, capturedEntry.SubjectId);
+        Assert.AreEqual(grantType, capturedEntry.GrantType);
+        Assert.AreEqual(ipAddress, capturedEntry.IpAddress);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task LogAuthenticationFailedAsync_ShouldStoreAuditLog()
     {
         // Arrange
@@ -77,13 +78,13 @@ public class AuditServiceTests
 
         // Assert
         _auditLogStoreMock.Verify(x => x.StoreAsync(It.IsAny<AuditLogEntry>(), It.IsAny<CancellationToken>()), Times.Once);
-        Assert.NotNull(capturedEntry);
-        Assert.Equal("authentication_failed", capturedEntry.EventType);
-        Assert.Equal(clientId, capturedEntry.ClientId);
-        Assert.Equal(reason, capturedEntry.Error);
+        Assert.IsNotNull(capturedEntry);
+        Assert.AreEqual("authentication_failed", capturedEntry.EventType);
+        Assert.AreEqual(clientId, capturedEntry.ClientId);
+        Assert.AreEqual(reason, capturedEntry.Error);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task LogTokenRevokedAsync_ShouldStoreAuditLog()
     {
         // Arrange
@@ -102,13 +103,13 @@ public class AuditServiceTests
         await _service.LogTokenRevokedAsync(clientId, subjectId, tokenType, ipAddress);
 
         // Assert
-        Assert.NotNull(capturedEntry);
-        Assert.Equal("token_revoked", capturedEntry.EventType);
-        Assert.Equal(clientId, capturedEntry.ClientId);
-        Assert.Equal(tokenType, capturedEntry.TokenType);
+        Assert.IsNotNull(capturedEntry);
+        Assert.AreEqual("token_revoked", capturedEntry.EventType);
+        Assert.AreEqual(clientId, capturedEntry.ClientId);
+        Assert.AreEqual(tokenType, capturedEntry.TokenType);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task LogAuthorizationCodeExchangedAsync_ShouldStoreAuditLog()
     {
         // Arrange
@@ -127,13 +128,13 @@ public class AuditServiceTests
         await _service.LogAuthorizationCodeExchangedAsync(clientId, subjectId, scopes, ipAddress);
 
         // Assert
-        Assert.NotNull(capturedEntry);
-        Assert.Equal("authorization_code_exchanged", capturedEntry.EventType);
-        Assert.Equal(clientId, capturedEntry.ClientId);
-        Assert.Equal("authorization_code", capturedEntry.GrantType);
+        Assert.IsNotNull(capturedEntry);
+        Assert.AreEqual("authorization_code_exchanged", capturedEntry.EventType);
+        Assert.AreEqual(clientId, capturedEntry.ClientId);
+        Assert.AreEqual("authorization_code", capturedEntry.GrantType);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task LogRefreshTokenUsedAsync_ShouldStoreAuditLog()
     {
         // Arrange
@@ -152,13 +153,13 @@ public class AuditServiceTests
         await _service.LogRefreshTokenUsedAsync(clientId, subjectId, scopes, ipAddress);
 
         // Assert
-        Assert.NotNull(capturedEntry);
-        Assert.Equal("refresh_token_used", capturedEntry.EventType);
-        Assert.Equal(clientId, capturedEntry.ClientId);
-        Assert.Equal("refresh_token", capturedEntry.GrantType);
+        Assert.IsNotNull(capturedEntry);
+        Assert.AreEqual("refresh_token_used", capturedEntry.EventType);
+        Assert.AreEqual(clientId, capturedEntry.ClientId);
+        Assert.AreEqual("refresh_token", capturedEntry.GrantType);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task LogSecurityEventAsync_ShouldStoreAuditLog()
     {
         // Arrange
@@ -177,13 +178,13 @@ public class AuditServiceTests
         await _service.LogSecurityEventAsync(eventType, clientId, details, ipAddress);
 
         // Assert
-        Assert.NotNull(capturedEntry);
-        Assert.Equal(eventType, capturedEntry.EventType);
-        Assert.Equal(clientId, capturedEntry.ClientId);
-        Assert.Equal(details, capturedEntry.Error);
+        Assert.IsNotNull(capturedEntry);
+        Assert.AreEqual(eventType, capturedEntry.EventType);
+        Assert.AreEqual(clientId, capturedEntry.ClientId);
+        Assert.AreEqual(details, capturedEntry.Error);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task LogTokenIssuedAsync_WithNullSubject_ShouldStoreAuditLog()
     {
         // Arrange
@@ -203,11 +204,11 @@ public class AuditServiceTests
         await _service.LogTokenIssuedAsync(clientId, subjectId, grantType, scopes, ipAddress);
 
         // Assert
-        Assert.NotNull(capturedEntry);
-        Assert.Null(capturedEntry.SubjectId);
+        Assert.IsNotNull(capturedEntry);
+        Assert.IsNull(capturedEntry.SubjectId);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task LogTokenIssuedAsync_WithEmptyScopes_ShouldStoreAuditLog()
     {
         // Arrange
@@ -227,11 +228,11 @@ public class AuditServiceTests
         await _service.LogTokenIssuedAsync(clientId, subjectId, grantType, scopes, ipAddress);
 
         // Assert
-        Assert.NotNull(capturedEntry);
-        Assert.Equal(string.Empty, capturedEntry.Scope);
+        Assert.IsNotNull(capturedEntry);
+        Assert.AreEqual(string.Empty, capturedEntry.Scope);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task LogTokenIssuedAsync_StoreThrowsException_ShouldLogError()
     {
         // Arrange

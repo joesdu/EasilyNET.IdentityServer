@@ -20,6 +20,7 @@ public class PersistentSigningService : ISigningService, IDisposable
     private readonly ISigningKeyStore _keyStore;
     private readonly Timer _rotationTimer;
     private readonly SemaphoreSlim _lock = new(1, 1);
+    private RSA? _lastPublicKey;
     private bool _disposed;
 
     public PersistentSigningService(
@@ -31,8 +32,8 @@ public class PersistentSigningService : ISigningService, IDisposable
         _options = options.Value;
         _logger = logger;
 
-        // 设置密钥轮换定时器（默认每90天）
-        var rotationInterval = TimeSpan.FromDays(90);
+        // Timer dueTime must stay within Int32.MaxValue milliseconds.
+        var rotationInterval = TimeSpan.FromDays(30);
         _rotationTimer = new Timer(
             async _ => await RotateKeysAsync(),
             null,
@@ -139,6 +140,10 @@ public class PersistentSigningService : ISigningService, IDisposable
         {
             KeyId = key.KeyId
         };
+        var publicKey = RSA.Create();
+        publicKey.ImportParameters(rsa.ExportParameters(false));
+        var previousPublicKey = Interlocked.Exchange(ref _lastPublicKey, publicKey);
+        previousPublicKey?.Dispose();
 
         return new SigningKeyResult
         {
@@ -196,13 +201,20 @@ public class PersistentSigningService : ISigningService, IDisposable
         _disposed = true;
         _rotationTimer?.Dispose();
         _lock?.Dispose();
+        _lastPublicKey?.Dispose();
     }
 
     /// <inheritdoc />
     public RSA? GetPublicKey()
     {
-        // 从存储的密钥信息导出公钥
-        // 注意：这是一个简化实现，实际应该从私钥派生或从数据库/配置加载
-        return RSA.Create();
+        if (_lastPublicKey == null)
+        {
+            return null;
+        }
+
+        var publicParameters = _lastPublicKey.ExportParameters(false);
+        var copy = RSA.Create();
+        copy.ImportParameters(publicParameters);
+        return copy;
     }
 }

@@ -7,13 +7,14 @@ using EasilyNET.IdentityServer.Core.Services;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
-using Xunit;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace EasilyNET.IdentityServer.Core.Tests.Services;
 
 /// <summary>
 /// 速率限制服务测试
 /// </summary>
+[TestClass]
 public class RateLimitServiceTests : IDisposable
 {
     private readonly RateLimitService _service;
@@ -37,7 +38,7 @@ public class RateLimitServiceTests : IDisposable
             _loggerMock.Object);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task IsAllowedAsync_FirstRequest_ShouldReturnTrue()
     {
         // Arrange
@@ -48,10 +49,10 @@ public class RateLimitServiceTests : IDisposable
         var result = await _service.IsAllowedAsync(key, limitType);
 
         // Assert
-        Assert.True(result);
+        Assert.IsTrue(result);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task IsAllowedAsync_WithinLimit_ShouldReturnTrue()
     {
         // Arrange
@@ -67,10 +68,10 @@ public class RateLimitServiceTests : IDisposable
         var result = await _service.IsAllowedAsync(key, limitType);
 
         // Assert
-        Assert.True(result);
+        Assert.IsTrue(result);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task IsAllowedAsync_ExceedsLimit_ShouldReturnFalse()
     {
         // Arrange
@@ -86,10 +87,10 @@ public class RateLimitServiceTests : IDisposable
         var result = await _service.IsAllowedAsync(key, limitType);
 
         // Assert
-        Assert.False(result);
+        Assert.IsFalse(result);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task IsAllowedAsync_DifferentKeys_ShouldBeIndependent()
     {
         // Arrange
@@ -109,11 +110,11 @@ public class RateLimitServiceTests : IDisposable
         var key2Result = await _service.IsAllowedAsync(key2, limitType);
 
         // Assert
-        Assert.False(key1Result);
-        Assert.True(key2Result);
+        Assert.IsFalse(key1Result);
+        Assert.IsTrue(key2Result);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task IsAllowedAsync_DifferentLimitTypes_ShouldBeIndependent()
     {
         // Arrange
@@ -131,11 +132,11 @@ public class RateLimitServiceTests : IDisposable
         var authorizeResult = await _service.IsAllowedAsync(key, RateLimitType.AuthorizeEndpoint);
 
         // Assert
-        Assert.False(tokenResult);
-        Assert.True(authorizeResult);
+        Assert.IsFalse(tokenResult);
+        Assert.IsTrue(authorizeResult);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task GetRemainingRequestsAsync_NoRequests_ShouldReturnMax()
     {
         // Arrange
@@ -146,10 +147,10 @@ public class RateLimitServiceTests : IDisposable
         var remaining = await _service.GetRemainingRequestsAsync(key, limitType);
 
         // Assert
-        Assert.Equal(5, remaining);
+        Assert.AreEqual(5, remaining);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task GetRemainingRequestsAsync_AfterRequests_ShouldReturnCorrectCount()
     {
         // Arrange
@@ -163,10 +164,10 @@ public class RateLimitServiceTests : IDisposable
         var remaining = await _service.GetRemainingRequestsAsync(key, limitType);
 
         // Assert (5 - 2 = 3)
-        Assert.Equal(3, remaining);
+        Assert.AreEqual(3, remaining);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ClearLimitAsync_ShouldResetCount()
     {
         // Arrange
@@ -180,17 +181,17 @@ public class RateLimitServiceTests : IDisposable
         }
 
         // 验证被限制
-        Assert.False(await _service.IsAllowedAsync(key, limitType));
+        Assert.IsFalse(await _service.IsAllowedAsync(key, limitType));
 
         // Act - 清除限制
         await _service.ClearLimitAsync(key);
 
         // Assert - 应该再次允许
-        Assert.True(await _service.IsAllowedAsync(key, limitType));
-        Assert.Equal(5, await _service.GetRemainingRequestsAsync(key, limitType));
+        Assert.IsTrue(await _service.IsAllowedAsync(key, limitType));
+        Assert.AreEqual(5, await _service.GetRemainingRequestsAsync(key, limitType));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task IsAllowedAsync_Disabled_ShouldAlwaysReturnTrue()
     {
         // Arrange
@@ -220,10 +221,10 @@ public class RateLimitServiceTests : IDisposable
         var result = await service.IsAllowedAsync(key, limitType);
 
         // Assert - 应该仍然允许
-        Assert.True(result);
+        Assert.IsTrue(result);
     }
 
-    [Fact]
+    [TestMethod]
     public void IsIpWhitelisted_WhitelistedIp_ShouldReturnTrue()
     {
         // Arrange
@@ -238,12 +239,12 @@ public class RateLimitServiceTests : IDisposable
             loggerMock.Object);
 
         // Act & Assert
-        Assert.True(service.IsIpWhitelisted("127.0.0.1"));
-        Assert.True(service.IsIpWhitelisted("10.0.0.1"));
-        Assert.False(service.IsIpWhitelisted("192.168.1.1"));
+        Assert.IsTrue(service.IsIpWhitelisted("127.0.0.1"));
+        Assert.IsTrue(service.IsIpWhitelisted("10.0.0.1"));
+        Assert.IsFalse(service.IsIpWhitelisted("192.168.1.1"));
     }
 
-    [Fact]
+    [TestMethod]
     public void IsClientWhitelisted_WhitelistedClient_ShouldReturnTrue()
     {
         // Arrange
@@ -258,17 +259,17 @@ public class RateLimitServiceTests : IDisposable
             loggerMock.Object);
 
         // Act & Assert
-        Assert.True(service.IsClientWhitelisted("admin"));
-        Assert.True(service.IsClientWhitelisted("internal-service"));
-        Assert.False(service.IsClientWhitelisted("regular-client"));
+        Assert.IsTrue(service.IsClientWhitelisted("admin"));
+        Assert.IsTrue(service.IsClientWhitelisted("internal-service"));
+        Assert.IsFalse(service.IsClientWhitelisted("regular-client"));
     }
 
-    [Theory]
-    [InlineData("/connect/token", RateLimitType.TokenEndpoint)]
-    [InlineData("/connect/authorize", RateLimitType.AuthorizeEndpoint)]
-    [InlineData("/connect/device_authorization", RateLimitType.DeviceAuthorizationEndpoint)]
-    [InlineData("/connect/device_verify", RateLimitType.VerifyEndpoint)]
-    [InlineData("/unknown", RateLimitType.General)]
+    [DataTestMethod]
+    [DataRow("/connect/token", RateLimitType.TokenEndpoint)]
+    [DataRow("/connect/authorize", RateLimitType.AuthorizeEndpoint)]
+    [DataRow("/connect/device_authorization", RateLimitType.DeviceAuthorizationEndpoint)]
+    [DataRow("/connect/device_verify", RateLimitType.VerifyEndpoint)]
+    [DataRow("/unknown", RateLimitType.General)]
     public void GetLimitTypeForEndpoint_VariousPaths_ShouldReturnCorrectType(string path, RateLimitType expected)
     {
         // Arrange
@@ -281,9 +282,10 @@ public class RateLimitServiceTests : IDisposable
         var result = service.GetLimitTypeForEndpoint(path);
 
         // Assert
-        Assert.Equal(expected, result);
+        Assert.AreEqual(expected, result);
     }
 
+    [TestCleanup]
     public void Dispose()
     {
         _service?.Dispose();

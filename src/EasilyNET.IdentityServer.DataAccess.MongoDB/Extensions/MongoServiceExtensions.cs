@@ -22,6 +22,7 @@ public static class MongoServiceExtensions
         services.AddScoped<IPersistedGrantStore, MongoPersistedGrantStore>();
         services.AddScoped<IDeviceFlowStore, MongoDeviceFlowStore>();
         services.AddScoped<IUserConsentStore, MongoUserConsentStore>();
+        services.AddScoped<ISigningKeyStore, MongoSigningKeyStore>();
         return services;
     }
 }

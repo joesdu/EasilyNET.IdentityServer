@@ -7,13 +7,14 @@ using EasilyNET.IdentityServer.Abstractions.Stores;
 using EasilyNET.IdentityServer.Core.Services;
 using Microsoft.Extensions.Logging;
 using Moq;
-using Xunit;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace EasilyNET.IdentityServer.Core.Tests.Services;
 
 /// <summary>
 /// 客户端认证服务测试
 /// </summary>
+[TestClass]
 public class ClientAuthenticationServiceTests
 {
     private readonly Mock<IClientStore> _clientStoreMock;
@@ -27,7 +28,7 @@ public class ClientAuthenticationServiceTests
         _service = new ClientAuthenticationService(_clientStoreMock.Object, _loggerMock.Object);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task AuthenticateAsync_ValidClientCredentials_ShouldReturnClient()
     {
         // Arrange
@@ -56,11 +57,11 @@ public class ClientAuthenticationServiceTests
         var result = await _service.AuthenticateAsync(clientId, clientSecret);
 
         // Assert
-        Assert.NotNull(result);
-        Assert.Equal(clientId, result.ClientId);
+        Assert.IsNotNull(result);
+        Assert.AreEqual(clientId, result.ClientId);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task AuthenticateAsync_InvalidClientId_ShouldReturnNull()
     {
         // Arrange
@@ -74,10 +75,10 @@ public class ClientAuthenticationServiceTests
         var result = await _service.AuthenticateAsync(clientId, clientSecret);
 
         // Assert
-        Assert.Null(result);
+        Assert.IsNull(result);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task AuthenticateAsync_DisabledClient_ShouldReturnNull()
     {
         // Arrange
@@ -106,10 +107,10 @@ public class ClientAuthenticationServiceTests
         var result = await _service.AuthenticateAsync(clientId, clientSecret);
 
         // Assert
-        Assert.Null(result);
+        Assert.IsNull(result);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task AuthenticateAsync_WrongSecret_ShouldReturnNull()
     {
         // Arrange
@@ -139,10 +140,10 @@ public class ClientAuthenticationServiceTests
         var result = await _service.AuthenticateAsync(clientId, wrongSecret);
 
         // Assert
-        Assert.Null(result);
+        Assert.IsNull(result);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task AuthenticateAsync_NoSecrets_ShouldReturnNull()
     {
         // Arrange
@@ -163,10 +164,10 @@ public class ClientAuthenticationServiceTests
         var result = await _service.AuthenticateAsync(clientId, clientSecret);
 
         // Assert
-        Assert.Null(result);
+        Assert.IsNull(result);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task AuthenticateAsync_ExpiredSecret_ShouldReturnNull()
     {
         // Arrange
@@ -196,10 +197,10 @@ public class ClientAuthenticationServiceTests
         var result = await _service.AuthenticateAsync(clientId, clientSecret);
 
         // Assert
-        Assert.Null(result);
+        Assert.IsNull(result);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task AuthenticateAsync_MultipleSecrets_OneValid_ShouldReturnClient()
     {
         // Arrange
@@ -234,11 +235,11 @@ public class ClientAuthenticationServiceTests
         var result = await _service.AuthenticateAsync(clientId, validSecret);
 
         // Assert
-        Assert.NotNull(result);
-        Assert.Equal(clientId, result.ClientId);
+        Assert.IsNotNull(result);
+        Assert.AreEqual(clientId, result.ClientId);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task AuthenticateAsync_PlainTextSecretType_ShouldAuthenticate()
     {
         // Arrange
@@ -266,11 +267,11 @@ public class ClientAuthenticationServiceTests
         var result = await _service.AuthenticateAsync(clientId, clientSecret);
 
         // Assert
-        Assert.NotNull(result);
-        Assert.Equal(clientId, result.ClientId);
+        Assert.IsNotNull(result);
+        Assert.AreEqual(clientId, result.ClientId);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task AuthenticateAsync_StoreThrowsException_ShouldReturnNull()
     {
         // Arrange
@@ -284,7 +285,7 @@ public class ClientAuthenticationServiceTests
         var result = await _service.AuthenticateAsync(clientId, clientSecret);
 
         // Assert
-        Assert.Null(result);
+        Assert.IsNull(result);
 
         _loggerMock.Verify(
             x => x.Log(

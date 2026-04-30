@@ -58,6 +58,7 @@ builder.Services.AddSingleton<IClientStore, InMemoryClientStore>();
 builder.Services.AddSingleton<IResourceStore, InMemoryResourceStore>();
 builder.Services.AddSingleton<IPersistedGrantStore, InMemoryPersistedGrantStore>();
 builder.Services.AddSingleton<IDeviceFlowStore, InMemoryDeviceFlowStore>();
+builder.Services.AddSingleton<IUserConsentStore, InMemoryUserConsentStore>();
 builder.Services.AddSingleton<ISigningKeyStore, InMemorySigningKeyStore>();
 builder.Services.AddSingleton<IAuditLogStore, InMemoryAuditLogStore>();
 
@@ -107,6 +108,49 @@ var app = builder.Build();
 // 配置中间件
 app.UseSerilogRequestLogging();
 
+app.Use(async (context, next) =>
+{
+    if (!app.Environment.IsDevelopment() &&
+        IsOAuthEndpoint(context.Request.Path) &&
+        !context.Request.IsHttps)
+    {
+        context.Response.StatusCode = StatusCodes.Status400BadRequest;
+        await context.Response.WriteAsJsonAsync(new { error = "invalid_request", error_description = "HTTPS is required for OAuth endpoints" });
+        return;
+    }
+
+    await next();
+});
+
+app.Use(async (context, next) =>
+{
+    var origin = context.Request.Headers.Origin.ToString();
+    if (string.IsNullOrEmpty(origin) || !IsCorsEnabledOAuthEndpoint(context.Request.Path))
+    {
+        await next();
+        return;
+    }
+
+    var clientStore = context.RequestServices.GetRequiredService<IClientStore>();
+    var clients = await clientStore.FindEnabledClientsAsync(context.RequestAborted);
+    var allowed = clients.Any(client => client.AllowedCorsOrigins.Any(allowedOrigin => string.Equals(allowedOrigin, origin, StringComparison.Ordinal)));
+    if (allowed)
+    {
+        context.Response.Headers.AccessControlAllowOrigin = origin;
+        context.Response.Headers.Vary = "Origin";
+        context.Response.Headers.AccessControlAllowHeaders = "Content-Type, Authorization";
+        context.Response.Headers.AccessControlAllowMethods = "POST, GET, OPTIONS";
+    }
+
+    if (HttpMethods.IsOptions(context.Request.Method))
+    {
+        context.Response.StatusCode = allowed ? StatusCodes.Status204NoContent : StatusCodes.Status403Forbidden;
+        return;
+    }
+
+    await next();
+});
+
 // 速率限制中间件（必须在审计日志之前，以便在限制时也能记录）
 app.UseRateLimiting();
 
@@ -149,6 +193,15 @@ app.MapControllers();
 // 健康检查端点
 app.MapGet("/health", () => Results.Ok(new { status = "healthy", timestamp = DateTime.UtcNow }));
 app.Run();
+
+static bool IsOAuthEndpoint(PathString path) => path.StartsWithSegments("/connect", StringComparison.OrdinalIgnoreCase);
+
+static bool IsCorsEnabledOAuthEndpoint(PathString path) =>
+    path.StartsWithSegments("/connect/token", StringComparison.OrdinalIgnoreCase) ||
+    path.StartsWithSegments("/connect/userinfo", StringComparison.OrdinalIgnoreCase) ||
+    path.StartsWithSegments("/connect/revocation", StringComparison.OrdinalIgnoreCase) ||
+    path.StartsWithSegments("/connect/introspect", StringComparison.OrdinalIgnoreCase) ||
+    path.StartsWithSegments("/connect/device_authorization", StringComparison.OrdinalIgnoreCase);
 
 /// <summary>
 /// Entry point for WebApplicationFactory in integration tests
