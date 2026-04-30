@@ -53,7 +53,9 @@ public class EfPersistedGrantStore(IdentityServerDbContext db) : IPersistedGrant
 
     public async Task<PersistedGrant?> GetAsync(string key, CancellationToken cancellationToken = default)
     {
-        var entity = await db.PersistedGrants.FindAsync([key], cancellationToken);
+        var entity = await db.PersistedGrants
+                             .AsNoTracking()
+                             .FirstOrDefaultAsync(x => x.Key == key, cancellationToken);
         return entity == null ? null : MapToModel(entity);
     }
 
@@ -81,7 +83,7 @@ public class EfPersistedGrantStore(IdentityServerDbContext db) : IPersistedGrant
 
     public async Task<IEnumerable<PersistedGrant>> GetAllAsync(PersistedGrantFilter filter, CancellationToken cancellationToken = default)
     {
-        var query = db.PersistedGrants.AsQueryable();
+        var query = db.PersistedGrants.AsNoTracking().AsQueryable();
         if (!string.IsNullOrEmpty(filter.SubjectId))
         {
             query = query.Where(g => g.SubjectId == filter.SubjectId);
@@ -112,6 +114,13 @@ public class EfPersistedGrantStore(IdentityServerDbContext db) : IPersistedGrant
         }
     }
 
+    public Task<int> RemoveExpiredAsync(DateTime cutoff, CancellationToken cancellationToken = default)
+    {
+        return db.PersistedGrants
+                 .Where(g => g.ExpirationTime.HasValue && g.ExpirationTime.Value < cutoff)
+                 .ExecuteDeleteAsync(cancellationToken);
+    }
+
     public async Task RemoveAllAsync(PersistedGrantFilter filter, CancellationToken cancellationToken = default)
     {
         var query = db.PersistedGrants.AsQueryable();
@@ -127,9 +136,12 @@ public class EfPersistedGrantStore(IdentityServerDbContext db) : IPersistedGrant
         {
             query = query.Where(g => g.Type == filter.Type);
         }
-        var entities = await query.ToListAsync(cancellationToken);
-        db.PersistedGrants.RemoveRange(entities);
-        await db.SaveChangesAsync(cancellationToken);
+        if (!string.IsNullOrEmpty(filter.SessionId))
+        {
+            query = query.Where(g => g.SessionId == filter.SessionId);
+        }
+
+        await query.ExecuteDeleteAsync(cancellationToken);
     }
 
     private static PersistedGrant MapToModel(PersistedGrantEntity e) =>
@@ -194,13 +206,17 @@ public class EfDeviceFlowStore(IdentityServerDbContext db) : IDeviceFlowStore
 
     public async Task<DeviceCodeData?> FindByDeviceCodeAsync(string deviceCode, CancellationToken cancellationToken = default)
     {
-        var entity = await db.DeviceCodes.FirstOrDefaultAsync(d => d.DeviceCode == deviceCode, cancellationToken);
+        var entity = await db.DeviceCodes
+                             .AsNoTracking()
+                             .FirstOrDefaultAsync(d => d.DeviceCode == deviceCode, cancellationToken);
         return entity == null ? null : MapToModel(entity);
     }
 
     public async Task<DeviceCodeData?> FindByUserCodeAsync(string userCode, CancellationToken cancellationToken = default)
     {
-        var entity = await db.DeviceCodes.FirstOrDefaultAsync(d => d.UserCode == userCode, cancellationToken);
+        var entity = await db.DeviceCodes
+                             .AsNoTracking()
+                             .FirstOrDefaultAsync(d => d.UserCode == userCode, cancellationToken);
         return entity == null ? null : MapToModel(entity);
     }
 
@@ -239,6 +255,13 @@ public class EfDeviceFlowStore(IdentityServerDbContext db) : IDeviceFlowStore
             db.DeviceCodes.Remove(entity);
             await db.SaveChangesAsync(cancellationToken);
         }
+    }
+
+    public Task<int> RemoveExpiredAsync(DateTime cutoff, CancellationToken cancellationToken = default)
+    {
+        return db.DeviceCodes
+                 .Where(d => d.ExpirationTime < cutoff)
+                 .ExecuteDeleteAsync(cancellationToken);
     }
 
     private static DeviceCodeData MapToModel(DeviceCodeEntity e) =>
@@ -291,6 +314,7 @@ public class EfUserConsentStore(IdentityServerDbContext db) : IUserConsentStore
     public async Task<UserConsent?> GetAsync(string subjectId, string clientId, CancellationToken cancellationToken = default)
     {
         var entity = await db.UserConsents
+                             .AsNoTracking()
                              .FirstOrDefaultAsync(c => c.SubjectId == subjectId && c.ClientId == clientId, cancellationToken);
         return entity == null
                    ? null
@@ -317,8 +341,8 @@ public class EfUserConsentStore(IdentityServerDbContext db) : IUserConsentStore
 
     public async Task RemoveAllAsync(string subjectId, CancellationToken cancellationToken = default)
     {
-        var entities = await db.UserConsents.Where(c => c.SubjectId == subjectId).ToListAsync(cancellationToken);
-        db.UserConsents.RemoveRange(entities);
-        await db.SaveChangesAsync(cancellationToken);
+        await db.UserConsents
+                .Where(c => c.SubjectId == subjectId)
+                .ExecuteDeleteAsync(cancellationToken);
     }
 }

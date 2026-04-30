@@ -9,6 +9,8 @@ public class ClientEntity
 
     public List<ClientCorsOriginEntity> AllowedCorsOrigins { get; set; } = [];
 
+    public List<ClientBackChannelLogoutUriEntity> BackChannelLogoutUris { get; set; } = [];
+
     public List<ClientGrantTypeEntity> AllowedGrantTypes { get; set; } = [];
 
     public List<ClientScopeEntity> AllowedScopes { get; set; } = [];
@@ -50,6 +52,8 @@ public class ClientEntity
     public int Id { get; set; }
 
     public List<ClientIdentityProviderRestrictionEntity> IdentityProviderRestrictions { get; set; } = [];
+
+    public List<ClientFrontChannelLogoutUriEntity> FrontChannelLogoutUris { get; set; } = [];
 
     public string? LogoUri { get; set; }
 
@@ -102,6 +106,28 @@ public class ClientRedirectUriEntity
     public int Id { get; set; }
 
     public required string RedirectUri { get; set; }
+}
+
+public class ClientFrontChannelLogoutUriEntity
+{
+    public ClientEntity Client { get; set; } = null!;
+
+    public int ClientId { get; set; }
+
+    public int Id { get; set; }
+
+    public required string LogoutUri { get; set; }
+}
+
+public class ClientBackChannelLogoutUriEntity
+{
+    public ClientEntity Client { get; set; } = null!;
+
+    public int ClientId { get; set; }
+
+    public int Id { get; set; }
+
+    public required string LogoutUri { get; set; }
 }
 
 public class ClientScopeEntity

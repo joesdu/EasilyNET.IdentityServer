@@ -22,6 +22,7 @@ public static class PostgreSqlServiceExtensions
         services.AddScoped<IDeviceFlowStore, EfDeviceFlowStore>();
         services.AddScoped<IUserConsentStore, EfUserConsentStore>();
         services.AddScoped<ISigningKeyStore, EfSigningKeyStore>();
+        services.AddScoped<IAuditLogStore, EfAuditLogStore>();
         return services;
     }
 }

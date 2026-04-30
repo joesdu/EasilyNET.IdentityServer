@@ -13,6 +13,8 @@ public class EfResourceStore(IdentityServerDbContext db) : IResourceStore
     public async Task<IEnumerable<ApiResource>> FindEnabledApiResourcesAsync(CancellationToken cancellationToken = default)
     {
         var entities = await db.ApiResources
+                               .AsNoTracking()
+                               .AsSplitQuery()
                                .Include(r => r.Scopes).Include(r => r.UserClaims).Include(r => r.ApiSecrets).Include(r => r.Properties)
                                .Where(r => r.Enabled).ToListAsync(cancellationToken);
         return entities.Select(MapApiResource);
@@ -21,6 +23,8 @@ public class EfResourceStore(IdentityServerDbContext db) : IResourceStore
     public async Task<IEnumerable<IdentityResource>> FindEnabledIdentityResourcesAsync(CancellationToken cancellationToken = default)
     {
         var entities = await db.IdentityResources
+                               .AsNoTracking()
+                               .AsSplitQuery()
                                .Include(r => r.UserClaims).Include(r => r.Properties)
                                .Where(r => r.Enabled).ToListAsync(cancellationToken);
         return entities.Select(MapIdentityResource);
@@ -30,6 +34,8 @@ public class EfResourceStore(IdentityServerDbContext db) : IResourceStore
     {
         var names = scopeNames.ToHashSet();
         var entities = await db.ApiResources
+                               .AsNoTracking()
+                               .AsSplitQuery()
                                .Include(r => r.Scopes).Include(r => r.UserClaims).Include(r => r.ApiSecrets).Include(r => r.Properties)
                                .Where(r => r.Enabled && r.Scopes.Any(s => names.Contains(s.Scope)))
                                .ToListAsync(cancellationToken);
@@ -39,6 +45,8 @@ public class EfResourceStore(IdentityServerDbContext db) : IResourceStore
     public async Task<IEnumerable<ApiScope>> FindEnabledScopesAsync(CancellationToken cancellationToken = default)
     {
         var entities = await db.ApiScopes
+                               .AsNoTracking()
+                               .AsSplitQuery()
                                .Include(s => s.UserClaims).Include(s => s.Properties)
                                .Where(s => s.Enabled).ToListAsync(cancellationToken);
         return entities.Select(MapApiScope);
@@ -48,6 +56,8 @@ public class EfResourceStore(IdentityServerDbContext db) : IResourceStore
     {
         var names = scopeNames.ToHashSet();
         var entities = await db.ApiScopes
+                               .AsNoTracking()
+                               .AsSplitQuery()
                                .Include(s => s.UserClaims).Include(s => s.Properties)
                                .Where(s => s.Enabled && names.Contains(s.Name))
                                .ToListAsync(cancellationToken);
@@ -70,7 +80,10 @@ public class EfResourceStore(IdentityServerDbContext db) : IResourceStore
     private static ApiResource MapApiResource(ApiResourceEntity e) =>
         new()
         {
-            Name = e.Name, DisplayName = e.DisplayName, Description = e.Description, Enabled = e.Enabled,
+            Name = e.Name,
+            DisplayName = e.DisplayName,
+            Description = e.Description,
+            Enabled = e.Enabled,
             Scopes = e.Scopes.Select(s => s.Scope).ToList(),
             UserClaims = e.UserClaims.Select(c => c.Type).ToList(),
             ApiSecrets = e.ApiSecrets.Select(s => new Secret { Value = s.Value, Description = s.Description, Expiration = s.Expiration, Type = s.Type }).ToList(),
@@ -80,8 +93,12 @@ public class EfResourceStore(IdentityServerDbContext db) : IResourceStore
     private static ApiScope MapApiScope(ApiScopeEntity e) =>
         new()
         {
-            Name = e.Name, DisplayName = e.DisplayName, Description = e.Description, Enabled = e.Enabled,
-            Required = e.Required, Emphasize = e.Emphasize,
+            Name = e.Name,
+            DisplayName = e.DisplayName,
+            Description = e.Description,
+            Enabled = e.Enabled,
+            Required = e.Required,
+            Emphasize = e.Emphasize,
             UserClaims = e.UserClaims.Select(c => c.Type).ToList(),
             Properties = e.Properties.ToDictionary(p => p.Key, p => p.Value)
         };
@@ -89,8 +106,13 @@ public class EfResourceStore(IdentityServerDbContext db) : IResourceStore
     private static IdentityResource MapIdentityResource(IdentityResourceEntity e) =>
         new()
         {
-            Name = e.Name, DisplayName = e.DisplayName, Description = e.Description, Enabled = e.Enabled,
-            Required = e.Required, Emphasize = e.Emphasize, ShowInDiscoveryDocument = e.ShowInDiscoveryDocument,
+            Name = e.Name,
+            DisplayName = e.DisplayName,
+            Description = e.Description,
+            Enabled = e.Enabled,
+            Required = e.Required,
+            Emphasize = e.Emphasize,
+            ShowInDiscoveryDocument = e.ShowInDiscoveryDocument,
             UserClaims = e.UserClaims.Select(c => c.Type).ToList(),
             Properties = e.Properties.ToDictionary(p => p.Key, p => p.Value)
         };

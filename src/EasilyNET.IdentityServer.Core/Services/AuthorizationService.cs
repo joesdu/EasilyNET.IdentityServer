@@ -145,10 +145,54 @@ public class AuthorizationService : IAuthorizationService
                 ErrorDescription = "code_challenge is required"
             };
         }
-        if (!string.IsNullOrEmpty(request.CodeChallengeMethod) && request.CodeChallengeMethod != "S256")
+
+        if (string.IsNullOrEmpty(request.CodeChallenge))
         {
+            if (!string.IsNullOrEmpty(request.CodeChallengeMethod))
+            {
+                return new()
+                {
+                    IsSuccess = false,
+                    Error = "invalid_request",
+                    ErrorDescription = "code_challenge_method must not be included when code_challenge is absent"
+                };
+            }
+        }
+        else
+        {
+            if (!IsValidPkceValue(request.CodeChallenge))
+            {
+                return new()
+                {
+                    IsSuccess = false,
+                    Error = "invalid_request",
+                    ErrorDescription = "code_challenge must be 43-128 characters using RFC 7636 unreserved characters"
+                };
+            }
+
             var plainPkceAllowed = _options.AllowPlainTextPkce && client.AllowPlainTextPkce;
-            if (!plainPkceAllowed)
+            if (string.IsNullOrEmpty(request.CodeChallengeMethod))
+            {
+                if (!plainPkceAllowed)
+                {
+                    return new()
+                    {
+                        IsSuccess = false,
+                        Error = "invalid_request",
+                        ErrorDescription = "code_challenge_method must be S256"
+                    };
+                }
+            }
+            else if (request.CodeChallengeMethod != "S256" && request.CodeChallengeMethod != "plain")
+            {
+                return new()
+                {
+                    IsSuccess = false,
+                    Error = "invalid_request",
+                    ErrorDescription = "Unsupported code_challenge_method"
+                };
+            }
+            else if (request.CodeChallengeMethod == "plain" && !plainPkceAllowed)
             {
                 return new()
                 {
@@ -279,7 +323,7 @@ public class AuthorizationService : IAuthorizationService
                 ["scope"] = string.Join(" ", scopes),
                 ["nonce"] = request.Nonce ?? string.Empty,
                 ["code_challenge"] = request.CodeChallenge ?? string.Empty,
-                ["code_challenge_method"] = request.CodeChallengeMethod ?? "S256"
+                ["code_challenge_method"] = request.CodeChallengeMethod ?? "plain"
             }
         }, cancellationToken);
 
@@ -355,4 +399,10 @@ public class AuthorizationService : IAuthorizationService
         uriWithoutPort = builder.Uri.AbsoluteUri;
         return true;
     }
+
+    private static bool IsValidPkceValue(string value) =>
+        value.Length is >= 43 and <= 128 && value.All(IsPkceCharacter);
+
+    private static bool IsPkceCharacter(char value) =>
+        char.IsAsciiLetterOrDigit(value) || value is '-' or '.' or '_' or '~';
 }

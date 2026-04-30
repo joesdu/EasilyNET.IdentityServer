@@ -183,13 +183,17 @@ public class TokenController : ControllerBase
 
         // PKCE 验证 (OAuth 2.1: 如果授权请求包含code_challenge,则必须验证code_verifier)
         var codeChallenge = grant.Properties.TryGetValue("code_challenge", out var cc) ? cc : null;
-        var codeChallengeMethod = grant.Properties.TryGetValue("code_challenge_method", out var ccm) ? ccm : "S256";
+        var codeChallengeMethod = grant.Properties.TryGetValue("code_challenge_method", out var ccm) && !string.IsNullOrWhiteSpace(ccm) ? ccm : "plain";
         if (!string.IsNullOrEmpty(codeChallenge))
         {
             // 授权请求包含code_challenge,必须验证code_verifier
             if (string.IsNullOrEmpty(codeVerifier))
             {
                 return BadRequest(new TokenErrorResponse("invalid_request", "code_verifier is required when code_challenge was present"));
+            }
+            if (!IsValidPkceValue(codeVerifier))
+            {
+                return BadRequest(new TokenErrorResponse("invalid_request", "code_verifier must be 43-128 characters using RFC 7636 unreserved characters"));
             }
             if (!ValidatePkce(codeVerifier, codeChallenge, codeChallengeMethod))
             {
@@ -201,7 +205,7 @@ public class TokenController : ControllerBase
             // 如果授权请求没有code_challenge但token请求包含code_verifier,拒绝
             return BadRequest(new TokenErrorResponse("invalid_request", "code_verifier must not be included when no code_challenge was used"));
         }
-        else if (client.RequirePkce)
+        else if (client.RequirePkce || _options.RequirePkce)
         {
             // 客户端强制要求PKCE但授权请求没有code_challenge
             return BadRequest(new TokenErrorResponse("invalid_request", "code_challenge is required for this client"));
@@ -632,6 +636,12 @@ public class TokenController : ControllerBase
                .TrimEnd('=')
                .Replace('+', '-')
                .Replace('/', '_');
+
+    private static bool IsValidPkceValue(string value) =>
+        value.Length is >= 43 and <= 128 && value.All(IsPkceCharacter);
+
+    private static bool IsPkceCharacter(char value) =>
+        char.IsAsciiLetterOrDigit(value) || value is '-' or '.' or '_' or '~';
 
     private string? GetClientIpAddress()
     {

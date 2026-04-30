@@ -1,4 +1,5 @@
 using EasilyNET.IdentityServer.Abstractions.Models;
+using EasilyNET.IdentityServer.Abstractions.Services;
 using EasilyNET.IdentityServer.Abstractions.Stores;
 using MongoDB.Driver;
 
@@ -131,14 +132,18 @@ public class MongoPersistedGrantStore(IMongoDatabase database) : IPersistedGrant
             filters.Add(builder.Eq(g => g.SessionId, filter.SessionId));
         }
         var combined = filters.Count > 0 ? builder.And(filters) : builder.Empty;
-        var entities = await Collection.Find(combined).ToListAsync(cancellationToken);
-        // 过滤掉已消费的授权码，与其他存储保持一致
-        return entities.Where(e => !e.ConsumedTime.HasValue);
+        return await Collection.Find(combined).ToListAsync(cancellationToken);
     }
 
     public async Task RemoveAsync(string key, CancellationToken cancellationToken = default)
     {
         await Collection.DeleteOneAsync(g => g.Key == key, cancellationToken);
+    }
+
+    public async Task<int> RemoveExpiredAsync(DateTime cutoff, CancellationToken cancellationToken = default)
+    {
+        var result = await Collection.DeleteManyAsync(g => g.ExpirationTime != null && g.ExpirationTime < cutoff, cancellationToken);
+        return (int)result.DeletedCount;
     }
 
     public async Task RemoveAllAsync(PersistedGrantFilter filter, CancellationToken cancellationToken = default)
@@ -156,6 +161,10 @@ public class MongoPersistedGrantStore(IMongoDatabase database) : IPersistedGrant
         if (!string.IsNullOrEmpty(filter.Type))
         {
             filters.Add(builder.Eq(g => g.Type, filter.Type));
+        }
+        if (!string.IsNullOrEmpty(filter.SessionId))
+        {
+            filters.Add(builder.Eq(g => g.SessionId, filter.SessionId));
         }
         var combined = filters.Count > 0 ? builder.And(filters) : builder.Empty;
         await Collection.DeleteManyAsync(combined, cancellationToken);
@@ -210,6 +219,12 @@ public class MongoDeviceFlowStore(IMongoDatabase database) : IDeviceFlowStore
     public async Task RemoveAsync(string deviceCode, CancellationToken cancellationToken = default)
     {
         await Collection.DeleteOneAsync(d => d.Code == deviceCode, cancellationToken);
+    }
+
+    public async Task<int> RemoveExpiredAsync(DateTime cutoff, CancellationToken cancellationToken = default)
+    {
+        var result = await Collection.DeleteManyAsync(d => d.ExpirationTime < cutoff, cancellationToken);
+        return (int)result.DeletedCount;
     }
 }
 
@@ -280,5 +295,68 @@ public class MongoSigningKeyStore(IMongoDatabase database) : ISigningKeyStore
     public async Task RemoveExpiredKeysAsync(DateTime cutoff, CancellationToken cancellationToken = default)
     {
         await Collection.DeleteManyAsync(k => k.DisabledAt != null && k.DisabledAt < cutoff, cancellationToken);
+    }
+}
+
+/// <summary>
+/// MongoDB 审计日志存储
+/// </summary>
+public class MongoAuditLogStore(IMongoDatabase database) : IAuditLogStore
+{
+    private IMongoCollection<AuditEvent> Collection => database.GetCollection<AuditEvent>("auditLogs");
+
+    public Task StoreAsync(AuditEvent auditEvent, CancellationToken cancellationToken = default)
+    {
+        return Collection.InsertOneAsync(auditEvent, cancellationToken: cancellationToken);
+    }
+
+    public async Task<IEnumerable<AuditEvent>> QueryAsync(AuditLogFilter filter, CancellationToken cancellationToken = default)
+    {
+        var builder = Builders<AuditEvent>.Filter;
+        var filters = new List<FilterDefinition<AuditEvent>>();
+
+        if (!string.IsNullOrWhiteSpace(filter.EventType))
+        {
+            filters.Add(builder.Eq(x => x.EventType, filter.EventType));
+        }
+
+        if (!string.IsNullOrWhiteSpace(filter.ClientId))
+        {
+            filters.Add(builder.Eq(x => x.ClientId, filter.ClientId));
+        }
+
+        if (!string.IsNullOrWhiteSpace(filter.SubjectId))
+        {
+            filters.Add(builder.Eq(x => x.SubjectId, filter.SubjectId));
+        }
+
+        if (filter.StartTime.HasValue)
+        {
+            filters.Add(builder.Gte(x => x.Timestamp, filter.StartTime.Value));
+        }
+
+        if (filter.EndTime.HasValue)
+        {
+            filters.Add(builder.Lte(x => x.Timestamp, filter.EndTime.Value));
+        }
+
+        if (filter.Success.HasValue)
+        {
+            filters.Add(builder.Eq(x => x.Success, filter.Success.Value));
+        }
+
+        var combined = filters.Count > 0 ? builder.And(filters) : builder.Empty;
+        IFindFluent<AuditEvent, AuditEvent> query = Collection.Find(combined).SortByDescending(x => x.Timestamp);
+        if (filter.Limit is > 0)
+        {
+            query = query.Limit(filter.Limit.Value);
+        }
+
+        return await query.ToListAsync(cancellationToken);
+    }
+
+    public async Task PurgeOldLogsAsync(DateTime cutoff, CancellationToken cancellationToken = default)
+    {
+        await Collection.DeleteManyAsync(x => x.Timestamp < cutoff, cancellationToken);
     }
 }

@@ -36,6 +36,11 @@ public interface IDeviceFlowStore
     /// 移除设备代码
     /// </summary>
     Task RemoveAsync(string deviceCode, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 批量移除在指定时间之前过期的设备代码，返回删除数量。
+    /// </summary>
+    Task<int> RemoveExpiredAsync(DateTime cutoff, CancellationToken cancellationToken = default);
 }
 
 /// <summary>

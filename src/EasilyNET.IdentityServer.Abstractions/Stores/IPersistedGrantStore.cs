@@ -33,6 +33,11 @@ public interface IPersistedGrantStore
     Task RemoveAsync(string key, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// 批量移除在指定时间之前过期的授权，返回删除数量。
+    /// </summary>
+    Task<int> RemoveExpiredAsync(DateTime cutoff, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// 移除所有匹配的授权
     /// </summary>
     Task RemoveAllAsync(PersistedGrantFilter filter, CancellationToken cancellationToken = default);

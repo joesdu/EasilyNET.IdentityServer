@@ -396,6 +396,10 @@ public class InMemoryPersistedGrantStore : IPersistedGrantStore
             {
                 query = query.Where(g => g.Type == filter.Type);
             }
+            if (!string.IsNullOrEmpty(filter.SessionId))
+            {
+                query = query.Where(g => g.SessionId == filter.SessionId);
+            }
             return Task.FromResult(query.AsEnumerable());
         }
     }
@@ -409,6 +413,23 @@ public class InMemoryPersistedGrantStore : IPersistedGrantStore
         return Task.CompletedTask;
     }
 
+    public Task<int> RemoveExpiredAsync(DateTime cutoff, CancellationToken cancellationToken = default)
+    {
+        lock (_lock)
+        {
+            var keys = _grants.Values
+                              .Where(g => g.ExpirationTime.HasValue && g.ExpirationTime.Value < cutoff)
+                              .Select(g => g.Key)
+                              .ToList();
+            foreach (var key in keys)
+            {
+                _grants.Remove(key);
+            }
+
+            return Task.FromResult(keys.Count);
+        }
+    }
+
     public Task RemoveAllAsync(PersistedGrantFilter filter, CancellationToken cancellationToken = default)
     {
         lock (_lock)
@@ -416,7 +437,8 @@ public class InMemoryPersistedGrantStore : IPersistedGrantStore
             var keys = _grants.Values
                               .Where(g => (string.IsNullOrEmpty(filter.SubjectId) || g.SubjectId == filter.SubjectId) &&
                                           (string.IsNullOrEmpty(filter.ClientId) || g.ClientId == filter.ClientId) &&
-                                          (string.IsNullOrEmpty(filter.Type) || g.Type == filter.Type))
+                                          (string.IsNullOrEmpty(filter.Type) || g.Type == filter.Type) &&
+                                          (string.IsNullOrEmpty(filter.SessionId) || g.SessionId == filter.SessionId))
                               .Select(g => g.Key)
                               .ToList();
             foreach (var key in keys)
@@ -564,5 +586,23 @@ public class InMemoryDeviceFlowStore : IDeviceFlowStore
             _userCodeIndex.TryRemove(data.UserCode, out _);
         }
         return Task.CompletedTask;
+    }
+
+    public Task<int> RemoveExpiredAsync(DateTime cutoff, CancellationToken cancellationToken = default)
+    {
+        var keys = _deviceCodes.Values
+                               .Where(code => code.ExpirationTime < cutoff)
+                               .Select(code => code.Code)
+                               .ToList();
+
+        foreach (var key in keys)
+        {
+            if (_deviceCodes.TryRemove(key, out var data))
+            {
+                _userCodeIndex.TryRemove(data.UserCode, out _);
+            }
+        }
+
+        return Task.FromResult(keys.Count);
     }
 }

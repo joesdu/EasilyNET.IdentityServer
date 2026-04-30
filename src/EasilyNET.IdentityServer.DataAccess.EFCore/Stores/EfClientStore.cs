@@ -20,8 +20,12 @@ public class EfClientStore(IdentityServerDbContext db) : IClientStore
     public async Task<Client?> FindClientByIdAsync(string clientId, CancellationToken cancellationToken = default)
     {
         var entity = await db.Clients
+                             .AsNoTracking()
+                             .AsSplitQuery()
                              .Include(c => c.AllowedGrantTypes)
                              .Include(c => c.RedirectUris)
+                             .Include(c => c.FrontChannelLogoutUris)
+                             .Include(c => c.BackChannelLogoutUris)
                              .Include(c => c.AllowedScopes)
                              .Include(c => c.ClientSecrets)
                              .Include(c => c.AuthorizationPromptTypes)
@@ -36,8 +40,12 @@ public class EfClientStore(IdentityServerDbContext db) : IClientStore
     public async Task<IEnumerable<Client>> FindEnabledClientsAsync(CancellationToken cancellationToken = default)
     {
         var entities = await db.Clients
+                               .AsNoTracking()
+                               .AsSplitQuery()
                                .Include(c => c.AllowedGrantTypes)
                                .Include(c => c.RedirectUris)
+                               .Include(c => c.FrontChannelLogoutUris)
+                               .Include(c => c.BackChannelLogoutUris)
                                .Include(c => c.AllowedScopes)
                                .Include(c => c.ClientSecrets)
                                .Include(c => c.AuthorizationPromptTypes)
@@ -62,6 +70,8 @@ public class EfClientStore(IdentityServerDbContext db) : IClientStore
             AllowedGrantTypes = e.AllowedGrantTypes.Select(g => g.GrantType).ToList(),
             AuthorizationPromptTypes = e.AuthorizationPromptTypes.Select(p => p.PromptType).ToList(),
             RedirectUris = e.RedirectUris.Select(r => r.RedirectUri).ToList(),
+            FrontChannelLogoutUris = e.FrontChannelLogoutUris.Select(r => r.LogoutUri).ToList(),
+            BackChannelLogoutUris = e.BackChannelLogoutUris.Select(r => r.LogoutUri).ToList(),
             AllowedScopes = e.AllowedScopes.Select(s => s.Scope).ToList(),
             ClientSecrets = e.ClientSecrets.Select(s => new Secret { Value = s.Value, Description = s.Description, Expiration = s.Expiration, Type = s.Type }).ToList(),
             Claims = e.Claims.Select(c => new ClientClaim { Type = c.Type, Value = c.Value }).ToList(),
@@ -101,6 +111,8 @@ public class EfClientStore(IdentityServerDbContext db) : IClientStore
             AllowedGrantTypes = client.AllowedGrantTypes.Select(grantType => new ClientGrantTypeEntity { GrantType = grantType }).ToList(),
             AuthorizationPromptTypes = client.AuthorizationPromptTypes.Select(promptType => new ClientAuthorizationPromptTypeEntity { PromptType = promptType }).ToList(),
             RedirectUris = client.RedirectUris.Select(uri => new ClientRedirectUriEntity { RedirectUri = uri }).ToList(),
+            FrontChannelLogoutUris = client.FrontChannelLogoutUris.Select(uri => new ClientFrontChannelLogoutUriEntity { LogoutUri = uri }).ToList(),
+            BackChannelLogoutUris = client.BackChannelLogoutUris.Select(uri => new ClientBackChannelLogoutUriEntity { LogoutUri = uri }).ToList(),
             AllowedScopes = client.AllowedScopes.Select(scope => new ClientScopeEntity { Scope = scope }).ToList(),
             ClientSecrets = client.ClientSecrets.Select(secret => new ClientSecretEntity
             {

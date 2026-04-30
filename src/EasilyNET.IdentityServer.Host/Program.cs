@@ -109,8 +109,8 @@ builder.Services.AddRateLimiting(options =>
 // 如需使用内存版本（开发环境），将 PersistentSigningService 改为 DefaultSigningService
 builder.Services.AddSingleton<ISigningService, PersistentSigningService>();
 
-// 注册数据库清理服务 (仅在使用 EF Core/MongoDB 存储时需要,内存存储不需要)
-builder.Services.AddSingleton<DatabaseCleanupService>();
+// 注册数据库清理后台服务（持久化存储启用后将自动执行过期清理）
+builder.Services.AddHostedService<DatabaseCleanupService>();
 
 // 注册 Token 响应生成器
 builder.Services.AddTransient<ITokenResponseGenerator, DefaultTokenResponseGenerator>();

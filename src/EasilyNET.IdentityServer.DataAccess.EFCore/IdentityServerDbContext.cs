@@ -10,6 +10,7 @@ namespace EasilyNET.IdentityServer.DataAccess.EFCore;
 public class IdentityServerDbContext(DbContextOptions<IdentityServerDbContext> options) : DbContext(options), IIdentityServerDbContext
 {
     public DbSet<SigningKeyEntity> SigningKeys => Set<SigningKeyEntity>();
+    public DbSet<AuditLogEntity> AuditLogs => Set<AuditLogEntity>();
     public DbSet<ApiResourceClaimEntity> ApiResourceClaims => Set<ApiResourceClaimEntity>();
 
     public DbSet<ApiResourcePropertyEntity> ApiResourceProperties => Set<ApiResourcePropertyEntity>();
@@ -32,6 +33,8 @@ public class IdentityServerDbContext(DbContextOptions<IdentityServerDbContext> o
 
     public DbSet<ClientCorsOriginEntity> ClientCorsOrigins => Set<ClientCorsOriginEntity>();
 
+    public DbSet<ClientBackChannelLogoutUriEntity> ClientBackChannelLogoutUris => Set<ClientBackChannelLogoutUriEntity>();
+
     public DbSet<ClientGrantTypeEntity> ClientGrantTypes => Set<ClientGrantTypeEntity>();
 
     public DbSet<ClientIdentityProviderRestrictionEntity> ClientIdentityProviderRestrictions => Set<ClientIdentityProviderRestrictionEntity>();
@@ -41,6 +44,8 @@ public class IdentityServerDbContext(DbContextOptions<IdentityServerDbContext> o
     public DbSet<ClientRedirectUriEntity> ClientRedirectUris => Set<ClientRedirectUriEntity>();
 
     public DbSet<ClientEntity> Clients => Set<ClientEntity>();
+
+    public DbSet<ClientFrontChannelLogoutUriEntity> ClientFrontChannelLogoutUris => Set<ClientFrontChannelLogoutUriEntity>();
 
     public DbSet<ClientScopeEntity> ClientScopes => Set<ClientScopeEntity>();
 
@@ -74,6 +79,8 @@ public class IdentityServerDbContext(DbContextOptions<IdentityServerDbContext> o
             b.HasMany(x => x.AuthorizationPromptTypes).WithOne(x => x.Client).HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.Claims).WithOne(x => x.Client).HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.AllowedCorsOrigins).WithOne(x => x.Client).HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Cascade);
+            b.HasMany(x => x.FrontChannelLogoutUris).WithOne(x => x.Client).HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Cascade);
+            b.HasMany(x => x.BackChannelLogoutUris).WithOne(x => x.Client).HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.IdentityProviderRestrictions).WithOne(x => x.Client).HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.Properties).WithOne(x => x.Client).HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Cascade);
         });
@@ -140,6 +147,16 @@ public class IdentityServerDbContext(DbContextOptions<IdentityServerDbContext> o
             b.HasIndex(x => x.KeyId).IsUnique();
             b.HasIndex(x => x.DisabledAt);
             b.Property(x => x.PrivateKey).HasMaxLength(4000);
+        });
+
+        // AuditLog
+        modelBuilder.Entity<AuditLogEntity>(b =>
+        {
+            b.HasKey(x => x.Id);
+            b.HasIndex(x => x.Timestamp);
+            b.HasIndex(x => x.EventType);
+            b.HasIndex(x => x.ClientId);
+            b.HasIndex(x => x.SubjectId);
         });
     }
 }
