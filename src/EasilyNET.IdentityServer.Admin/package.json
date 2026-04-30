@@ -12,7 +12,7 @@
   "dependencies": {
     "@ant-design/icons": "^5.6.1",
     "@ant-design/pro-components": "^2.8.10",
-    "@umijs/max": "^4.6.47",
+    "@umijs/max": "^4.6.49",
     "antd": "^5.29.3"
   },
   "devDependencies": {
