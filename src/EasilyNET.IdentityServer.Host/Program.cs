@@ -64,6 +64,7 @@ builder.Services.AddSingleton<IAuditLogStore, InMemoryAuditLogStore>();
 
 // 注册核心服务
 builder.Services.AddSingleton<ISerializationService, SerializationService>();
+builder.Services.AddSingleton<IAuthorizationRequestContextService, AuthorizationRequestContextService>();
 builder.Services.AddSingleton<ITokenService, TokenService>();
 builder.Services.AddSingleton<IClientAuthenticationService, ClientAuthenticationService>();
 builder.Services.AddSingleton<IAuthorizationService, AuthorizationService>();

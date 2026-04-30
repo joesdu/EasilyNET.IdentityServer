@@ -92,6 +92,27 @@ public interface IAuthorizationService
 }
 
 /// <summary>
+/// 授权请求上下文服务
+/// </summary>
+public interface IAuthorizationRequestContextService
+{
+    /// <summary>
+    /// 存储授权请求上下文
+    /// </summary>
+    Task StoreAsync(AuthorizationRequestContext context, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 获取授权请求上下文
+    /// </summary>
+    Task<AuthorizationRequestContext?> GetAsync(string requestId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 删除授权请求上下文
+    /// </summary>
+    Task RemoveAsync(string requestId, CancellationToken cancellationToken = default);
+}
+
+/// <summary>
 /// 授权请求
 /// </summary>
 public class AuthorizationRequest
@@ -242,6 +263,102 @@ public class ApprovedAuthorizationRequest
     /// 主题Id
     /// </summary>
     public required string SubjectId { get; init; }
+}
+
+/// <summary>
+/// 持久化的授权请求上下文
+/// </summary>
+public class AuthorizationRequestContext
+{
+    /// <summary>
+    /// 客户端标识
+    /// </summary>
+    public required string ClientId { get; init; }
+
+    /// <summary>
+    /// 客户端名称
+    /// </summary>
+    public string? ClientName { get; init; }
+
+    /// <summary>
+    /// 客户端主页
+    /// </summary>
+    public string? ClientUri { get; init; }
+
+    /// <summary>
+    /// Logo URI
+    /// </summary>
+    public string? LogoUri { get; init; }
+
+    /// <summary>
+    /// PKCE Code Challenge
+    /// </summary>
+    public string? CodeChallenge { get; init; }
+
+    /// <summary>
+    /// PKCE Code Challenge Method
+    /// </summary>
+    public string? CodeChallengeMethod { get; init; }
+
+    /// <summary>
+    /// 创建时间
+    /// </summary>
+    public DateTime CreationTime { get; init; }
+
+    /// <summary>
+    /// 过期时间
+    /// </summary>
+    public DateTime ExpirationTime { get; init; }
+
+    /// <summary>
+    /// 登录提示
+    /// </summary>
+    public string? LoginHint { get; init; }
+
+    /// <summary>
+    /// 最大认证年龄（秒）
+    /// </summary>
+    public int? MaxAge { get; init; }
+
+    /// <summary>
+    /// Nonce
+    /// </summary>
+    public string? Nonce { get; init; }
+
+    /// <summary>
+    /// 提示
+    /// </summary>
+    public string? Prompt { get; init; }
+
+    /// <summary>
+    /// 是否允许记住同意
+    /// </summary>
+    public bool RememberConsentAllowed { get; init; }
+
+    /// <summary>
+    /// 是否需要同意
+    /// </summary>
+    public bool RequiresConsent { get; init; }
+
+    /// <summary>
+    /// 重定向 URI
+    /// </summary>
+    public required string RedirectUri { get; init; }
+
+    /// <summary>
+    /// 请求标识
+    /// </summary>
+    public required string RequestId { get; init; }
+
+    /// <summary>
+    /// 请求的作用域
+    /// </summary>
+    public required string[] RequestedScopes { get; init; }
+
+    /// <summary>
+    /// 状态参数
+    /// </summary>
+    public string? State { get; init; }
 }
 
 /// <summary>

@@ -13,6 +13,7 @@ namespace EasilyNET.IdentityServer.Core.Services;
 public class AuthorizationService : IAuthorizationService
 {
     private static readonly string[] SupportedPromptValues = ["none", "login", "consent", "select_account"];
+    private readonly IAuthorizationRequestContextService _authorizationRequestContextService;
     private readonly IClientStore _clientStore;
     private readonly IUserConsentStore? _consentStore;
     private readonly IPersistedGrantStore _grantStore;
@@ -24,6 +25,7 @@ public class AuthorizationService : IAuthorizationService
         IClientStore clientStore,
         IResourceStore resourceStore,
         IPersistedGrantStore grantStore,
+        IAuthorizationRequestContextService authorizationRequestContextService,
         IdentityServerOptions options,
         ILogger<AuthorizationService> logger,
         IUserConsentStore? consentStore = null)
@@ -31,6 +33,7 @@ public class AuthorizationService : IAuthorizationService
         _clientStore = clientStore;
         _resourceStore = resourceStore;
         _grantStore = grantStore;
+        _authorizationRequestContextService = authorizationRequestContextService;
         _options = options;
         _logger = logger;
         _consentStore = consentStore;
@@ -142,11 +145,12 @@ public class AuthorizationService : IAuthorizationService
         }
 
         // 验证 scopes
+        var requestedScopes = request.Scopes.ToArray();
         var enabledScopes = (await _resourceStore.FindEnabledScopesAsync(cancellationToken)).Select(x => x.Name)
             .Concat((await _resourceStore.FindEnabledIdentityResourcesAsync(cancellationToken)).Where(x => x.ShowInDiscoveryDocument).Select(x => x.Name))
             .ToHashSet(StringComparer.Ordinal);
         var allowedScopes = client.AllowedScopes.ToHashSet();
-        foreach (var scope in request.Scopes)
+        foreach (var scope in requestedScopes)
         {
             if (!allowedScopes.Contains(scope) || !enabledScopes.Contains(scope))
             {
@@ -158,7 +162,30 @@ public class AuthorizationService : IAuthorizationService
                 };
             }
         }
+        var effectiveRequestedScopes = requestedScopes.Length == 0 ? client.AllowedScopes.ToArray() : requestedScopes;
         var requestId = Guid.NewGuid().ToString("N");
+        await _authorizationRequestContextService.StoreAsync(new AuthorizationRequestContext
+        {
+            RequestId = requestId,
+            ClientId = client.ClientId,
+            ClientName = client.ClientName,
+            ClientUri = client.ClientUri,
+            LogoUri = client.LogoUri,
+            RedirectUri = request.RedirectUri,
+            RequestedScopes = effectiveRequestedScopes,
+            State = request.State,
+            Nonce = request.Nonce,
+            CodeChallenge = request.CodeChallenge,
+            CodeChallengeMethod = request.CodeChallengeMethod,
+            Prompt = request.Prompt,
+            LoginHint = request.LoginHint,
+            MaxAge = request.MaxAge,
+            RequiresConsent = client.RequireConsent,
+            RememberConsentAllowed = client.AllowRememberConsent && _options.AllowRememberConsent,
+            CreationTime = DateTime.UtcNow,
+            ExpirationTime = DateTime.UtcNow.AddSeconds(Math.Max(client.AuthorizationCodeLifetime > 0 ? client.AuthorizationCodeLifetime : _options.AuthorizationCodeLifetime, 300))
+        }, cancellationToken);
+
         return new()
         {
             IsSuccess = true,
@@ -179,6 +206,17 @@ public class AuthorizationService : IAuthorizationService
     /// <inheritdoc />
     public async Task<ApprovedAuthorizationResult> ApproveAuthorizationRequestAsync(ApprovedAuthorizationRequest request, CancellationToken cancellationToken = default)
     {
+        var requestContext = await _authorizationRequestContextService.GetAsync(request.RequestId, cancellationToken);
+        if (requestContext == null)
+        {
+            return new()
+            {
+                IsSuccess = false,
+                Error = "invalid_request",
+                ErrorDescription = "Authorization request context was not found or has expired"
+            };
+        }
+
         var client = await _clientStore.FindClientByIdAsync(request.ClientId, cancellationToken);
         if (client == null || !client.Enabled)
         {
@@ -187,6 +225,17 @@ public class AuthorizationService : IAuthorizationService
                 IsSuccess = false,
                 Error = "invalid_client",
                 ErrorDescription = "Client not found or disabled"
+            };
+        }
+
+        if (!string.Equals(requestContext.ClientId, request.ClientId, StringComparison.Ordinal) ||
+            !string.Equals(requestContext.RedirectUri, request.RedirectUri, StringComparison.Ordinal))
+        {
+            return new()
+            {
+                IsSuccess = false,
+                Error = "invalid_request",
+                ErrorDescription = "Authorization request context does not match the approval request"
             };
         }
 
@@ -229,6 +278,8 @@ public class AuthorizationService : IAuthorizationService
                 ExpirationTime = DateTime.UtcNow.AddSeconds(_options.ConsentLifetime)
             }, cancellationToken);
         }
+
+        await _authorizationRequestContextService.RemoveAsync(request.RequestId, cancellationToken);
         return new()
         {
             IsSuccess = true,
@@ -240,7 +291,7 @@ public class AuthorizationService : IAuthorizationService
     public async Task DenyAuthorizationRequestAsync(string requestId, CancellationToken cancellationToken = default)
     {
         _logger.LogInformation("Authorization request {RequestId} denied", requestId);
-        await Task.CompletedTask;
+        await _authorizationRequestContextService.RemoveAsync(requestId, cancellationToken);
     }
 
     /// <summary>

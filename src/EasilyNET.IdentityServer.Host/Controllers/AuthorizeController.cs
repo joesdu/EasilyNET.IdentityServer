@@ -131,12 +131,14 @@ public class AuthorizeController : ControllerBase
             }
 
             return BuildInteractionRequiredResponse(StatusCodes.Status409Conflict, "select_account", client, validation.RequestId!, requestedScopes, redirect_uri, state,
-                "Account selection is required", login_hint);
+                "Account selection is required", login_hint, prompt, max_age);
         }
 
         if (prompts.Contains("login", StringComparer.Ordinal))
         {
             return BuildLoginInteractionResponse(prompts.Contains("none", StringComparer.Ordinal), redirect_uri, state, client, validation.RequestId!, requestedScopes, login_hint,
+                prompt,
+                max_age,
                 prompts.Contains("none", StringComparer.Ordinal)
                     ? "The request requires user re-authentication"
                     : "User re-authentication is required");
@@ -145,6 +147,8 @@ public class AuthorizeController : ControllerBase
         if (requiresFreshLogin)
         {
             return BuildLoginInteractionResponse(prompts.Contains("none", StringComparer.Ordinal), redirect_uri, state, client, validation.RequestId!, requestedScopes, login_hint,
+                prompt,
+                max_age,
                 prompts.Contains("none", StringComparer.Ordinal)
                     ? "The authenticated session is too old"
                     : "User re-authentication is required because max_age was exceeded");
@@ -159,7 +163,7 @@ public class AuthorizeController : ControllerBase
         if (string.IsNullOrEmpty(subjectId))
         {
             return BuildInteractionRequiredResponse(StatusCodes.Status401Unauthorized, "login", client, validation.RequestId!, requestedScopes, redirect_uri, state,
-                "User authentication is required", login_hint);
+                "User authentication is required", login_hint, prompt, max_age);
         }
 
         // 检查是否需要 consent (prompt=consent 强制要求)
@@ -183,7 +187,7 @@ public class AuthorizeController : ControllerBase
         if (needsConsent && !consentAccepted)
         {
             return BuildInteractionRequiredResponse(StatusCodes.Status403Forbidden, "consent", client, validation.RequestId!, requestedScopes, redirect_uri, state,
-                "User consent is required", login_hint);
+                "User consent is required", login_hint, prompt, max_age);
         }
 
         var rememberConsentRequested = string.Equals(Request.Query["remember_consent"], "true", StringComparison.OrdinalIgnoreCase) ||
@@ -248,11 +252,13 @@ public class AuthorizeController : ControllerBase
         string requestId,
         IEnumerable<string> requestedScopes,
         string? loginHint,
+        string? prompt,
+        int? maxAge,
         string detail)
     {
         return redirectForPromptNone
             ? RedirectWithError(redirectUri, state, "login_required", detail)
-            : BuildInteractionRequiredResponse(StatusCodes.Status401Unauthorized, "login", client, requestId, requestedScopes, redirectUri, state, detail, loginHint);
+            : BuildInteractionRequiredResponse(StatusCodes.Status401Unauthorized, "login", client, requestId, requestedScopes, redirectUri, state, detail, loginHint, prompt, maxAge);
     }
 
     private static bool HasFreshAuthentication(DateTimeOffset? authenticationTime, int maxAgeSeconds)
@@ -330,7 +336,9 @@ public class AuthorizeController : ControllerBase
         string redirectUri,
         string? state,
         string detail,
-        string? loginHint)
+        string? loginHint,
+        string? prompt,
+        int? maxAge)
     {
         return StatusCode(statusCode, new AuthorizationInteractionResponse
         {
@@ -344,16 +352,32 @@ public class AuthorizeController : ControllerBase
             State = state,
             LoginHint = loginHint,
             RequestedScopes = requestedScopes.ToArray(),
-            RememberConsentAllowed = client.AllowRememberConsent && _options.AllowRememberConsent
+            RememberConsentAllowed = client.AllowRememberConsent && _options.AllowRememberConsent,
+            Prompt = prompt,
+            MaxAge = maxAge,
+            ContextEndpoint = $"/connect/authorize/context/{requestId}",
+            ContinueEndpoint = "/connect/authorize/interaction",
+            AvailableActions = interactionType switch
+            {
+                "login" => ["login", "deny"],
+                "select_account" => ["select_account", "deny"],
+                _ => ["consent", "deny"]
+            }
         });
     }
 }
 
 internal sealed class AuthorizationInteractionResponse
 {
+    public required string[] AvailableActions { get; init; }
+
     public required string ClientId { get; init; }
 
     public string? ClientName { get; init; }
+
+    public string? ContextEndpoint { get; init; }
+
+    public string? ContinueEndpoint { get; init; }
 
     public required string Error { get; init; }
 
@@ -362,6 +386,10 @@ internal sealed class AuthorizationInteractionResponse
     public required string InteractionType { get; init; }
 
     public string? LoginHint { get; init; }
+
+    public int? MaxAge { get; init; }
+
+    public string? Prompt { get; init; }
 
     public bool RememberConsentAllowed { get; init; }
 

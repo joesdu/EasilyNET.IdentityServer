@@ -77,6 +77,12 @@ public class IdentityServerTests
         return response.RequestMessage!.RequestUri!;
     }
 
+    private static HttpRequestMessage PostJson(string url, object payload) =>
+        new(HttpMethod.Post, url)
+        {
+            Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
+        };
+
     #region Revocation
 
     /// <summary>
@@ -370,6 +376,72 @@ public class IdentityServerTests
         var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
         Assert.AreEqual("interaction_required", json.RootElement.GetProperty("error").GetString());
         Assert.AreEqual("login", json.RootElement.GetProperty("interactionType").GetString());
+        Assert.AreEqual("/connect/authorize/interaction", json.RootElement.GetProperty("continueEndpoint").GetString());
+        Assert.IsTrue(json.RootElement.GetProperty("contextEndpoint").GetString()!.Contains("/connect/authorize/context/", StringComparison.Ordinal));
+        CollectionAssert.Contains(json.RootElement.GetProperty("availableActions").EnumerateArray().Select(x => x.GetString()).ToList(), "login");
+    }
+
+    /// <summary>
+    /// Test authorization request context can be retrieved via request id
+    /// </summary>
+    [TestMethod]
+    public async Task AuthorizationInteraction_ContextEndpoint_ReturnsPersistedContext()
+    {
+        var verifier = CreateCodeVerifier();
+        var challenge = CreateCodeChallenge(verifier);
+        var response = await _client.GetAsync($"/connect/authorize?response_type=code&client_id=spa&redirect_uri={Uri.EscapeDataString("http://localhost:3000/callback")}&scope=openid%20profile%20api1&state=ctx-state&login_hint=alice@example.com&code_challenge={challenge}&code_challenge_method=S256");
+
+        Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
+        var interactionJson = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+        var requestId = interactionJson.RootElement.GetProperty("requestId").GetString();
+        var contextEndpoint = interactionJson.RootElement.GetProperty("contextEndpoint").GetString();
+
+        Assert.IsFalse(string.IsNullOrWhiteSpace(requestId));
+        Assert.IsFalse(string.IsNullOrWhiteSpace(contextEndpoint));
+
+        var contextResponse = await _client.GetAsync(contextEndpoint!);
+        contextResponse.EnsureSuccessStatusCode();
+        var contextJson = await JsonDocument.ParseAsync(await contextResponse.Content.ReadAsStreamAsync());
+
+        Assert.AreEqual(requestId, contextJson.RootElement.GetProperty("requestId").GetString());
+        Assert.AreEqual("spa", contextJson.RootElement.GetProperty("clientId").GetString());
+        Assert.AreEqual("http://localhost:3000/callback", contextJson.RootElement.GetProperty("redirectUri").GetString());
+        Assert.AreEqual("alice@example.com", contextJson.RootElement.GetProperty("loginHint").GetString());
+        CollectionAssert.AreEquivalent(new[] { "openid", "profile", "api1" }, contextJson.RootElement.GetProperty("requestedScopes").EnumerateArray().Select(x => x.GetString()!).ToArray());
+    }
+
+    /// <summary>
+    /// Test interaction continuation completes authorization and returns redirect payload
+    /// </summary>
+    [TestMethod]
+    public async Task AuthorizationInteraction_LoginAction_CompletesAuthorization()
+    {
+        var verifier = CreateCodeVerifier();
+        var challenge = CreateCodeChallenge(verifier);
+        var response = await _client.GetAsync($"/connect/authorize?response_type=code&client_id=spa&redirect_uri={Uri.EscapeDataString("http://localhost:3000/callback")}&scope=openid%20profile%20api1&state=interactive&code_challenge={challenge}&code_challenge_method=S256");
+
+        Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
+        var interactionJson = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+        var requestId = interactionJson.RootElement.GetProperty("requestId").GetString()!;
+
+        var continueResponse = await _client.SendAsync(PostJson("/connect/authorize/interaction", new
+        {
+            requestId,
+            action = "login",
+            subjectId = "interactive-user"
+        }));
+        continueResponse.EnsureSuccessStatusCode();
+
+        var continueJson = await JsonDocument.ParseAsync(await continueResponse.Content.ReadAsStreamAsync());
+        Assert.AreEqual("redirect", continueJson.RootElement.GetProperty("outcome").GetString());
+
+        var redirectUrl = continueJson.RootElement.GetProperty("redirectUrl").GetString();
+        Assert.IsFalse(string.IsNullOrWhiteSpace(redirectUrl));
+        var redirectUri = new Uri(redirectUrl!);
+        var query = System.Web.HttpUtility.ParseQueryString(redirectUri.Query);
+        Assert.IsFalse(string.IsNullOrWhiteSpace(query["code"]));
+        Assert.AreEqual("interactive", query["state"]);
+        Assert.AreEqual("https://localhost:7020", query["iss"]);
     }
 
     /// <summary>
