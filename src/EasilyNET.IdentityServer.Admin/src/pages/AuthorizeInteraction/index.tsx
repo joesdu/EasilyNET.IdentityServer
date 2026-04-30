@@ -1,8 +1,9 @@
-import { Alert, App, Avatar, Button, Card, Checkbox, Col, Divider, Empty, Input, List, Result, Row, Space, Spin, Tag, Typography } from 'antd';
 import { AuthorizationRequestContextResponse, AuthorizationScopeDescriptor, getAuthorizationInteractionContext, submitAuthorizationInteraction } from '@/services/api';
-import { LockOutlined, LoginOutlined, SafetyCertificateOutlined, UserSwitchOutlined } from '@ant-design/icons';
+import { CheckCircleOutlined, ClockCircleOutlined, LinkOutlined, LockOutlined, LoginOutlined, SafetyCertificateOutlined, UserSwitchOutlined } from '@ant-design/icons';
 import { history, useLocation } from '@umijs/max';
+import { Alert, App, Avatar, Button, Card, Checkbox, Col, Divider, Empty, Input, List, Result, Row, Space, Spin, Statistic, Steps, Tag, Typography } from 'antd';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import styles from './index.module.css';
 
 const { Paragraph, Text, Title } = Typography;
 
@@ -11,6 +12,8 @@ const riskColorMap: Record<string, string> = {
   medium: 'gold',
   high: 'red',
 };
+
+const interactionStepOrder: Array<'login' | 'select_account' | 'consent'> = ['login', 'select_account', 'consent'];
 
 const stepMeta: Record<string, { icon: React.ReactNode; title: string; subtitle: string }> = {
   login: {
@@ -163,6 +166,8 @@ export default function AuthorizeInteractionPage() {
 
   const primaryActionLabel = currentStep === 'consent' ? '确认并继续授权' : currentStep === 'select_account' ? '使用所选账号继续' : '登录并继续';
   const primaryAction = currentStep === 'consent' ? 'consent' : currentStep === 'select_account' ? 'select_account' : 'login';
+  const currentStepIndex = Math.max(interactionStepOrder.indexOf(currentStep), 0);
+  const expiresInMinutes = context ? Math.max(Math.ceil((new Date(context.expiresAt).getTime() - Date.now()) / 60000), 0) : 0;
 
   if (loading) {
     return (
@@ -206,33 +211,91 @@ export default function AuthorizeInteractionPage() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: 'linear-gradient(180deg, #f7f9fc 0%, #eef3fb 100%)', padding: '40px 16px' }}>
+    <div className={styles.page}>
       <Row justify="center">
         <Col xs={24} sm={22} md={20} lg={18} xl={16} xxl={14}>
-          <Space direction="vertical" size={20} style={{ width: '100%' }}>
-            <Card bordered={false} style={{ borderRadius: 20, boxShadow: '0 18px 50px rgba(15, 23, 42, 0.08)' }}>
-              <Space size={16} align="start">
-                <Avatar size={56} icon={stepInfo.icon} style={{ backgroundColor: '#1677ff' }} />
-                <div style={{ flex: 1 }}>
-                  <Title level={3} style={{ margin: 0 }}>
-                    {stepInfo.title}
-                  </Title>
-                  <Paragraph type="secondary" style={{ marginTop: 8, marginBottom: 12 }}>
-                    {stepInfo.subtitle}
-                  </Paragraph>
-                  <Space wrap>
-                    <Tag color="blue">Client ID: {context.clientId}</Tag>
-                    {context.clientName && <Tag color="geekblue">{context.clientName}</Tag>}
-                    <Tag color="purple">requestId: {context.requestId}</Tag>
-                    {context.prompt && <Tag>prompt: {context.prompt}</Tag>}
+          <Space direction="vertical" size={20} className={styles.stack}>
+            <Card bordered={false} className={styles.heroCard}>
+              <div className={styles.heroGrid}>
+                <div>
+                  <div className={styles.heroIdentity}>
+                    <Avatar size={64} src={context.logoUri} icon={stepInfo.icon} style={{ backgroundColor: '#1677ff' }} />
+                    <div style={{ flex: 1 }}>
+                      <Title level={2} className={styles.heroTitle}>
+                        {stepInfo.title}
+                      </Title>
+                      <Paragraph type="secondary" className={styles.heroSubtitle}>
+                        {stepInfo.subtitle}
+                      </Paragraph>
+                      <Space wrap>
+                        <Tag color="blue">Client ID: {context.clientId}</Tag>
+                        {context.clientName && <Tag color="geekblue">{context.clientName}</Tag>}
+                        <Tag color="purple">requestId: {context.requestId}</Tag>
+                        {context.prompt && <Tag>prompt: {context.prompt}</Tag>}
+                      </Space>
+                    </div>
+                  </div>
+
+                  <Divider />
+
+                  <Steps
+                    current={currentStepIndex}
+                    items={interactionStepOrder.map((step) => ({
+                      title: stepMeta[step].title,
+                      description: step === currentStep ? '当前步骤' : undefined,
+                    }))}
+                  />
+                </div>
+
+                <div className={styles.metaPanel}>
+                  <div className={styles.summaryStats}>
+                    <div className={styles.summaryStat}>
+                      <Statistic title="到期时间" value={expiresInMinutes} suffix="分钟" prefix={<ClockCircleOutlined />} />
+                    </div>
+                    <div className={styles.summaryStat}>
+                      <Statistic title="权限数量" value={context.requestedScopes.length} prefix={<CheckCircleOutlined />} />
+                    </div>
+                  </div>
+
+                  <Divider style={{ margin: '16px 0' }} />
+
+                  <Space direction="vertical" size={10} style={{ width: '100%' }}>
+                    <div>
+                      <Text type="secondary" className={styles.metaLabel}>
+                        回调地址
+                      </Text>
+                      <Paragraph copyable style={{ marginBottom: 0 }}>
+                        {context.redirectUri}
+                      </Paragraph>
+                    </div>
+                    {context.clientUri && (
+                      <div>
+                        <Text type="secondary" className={styles.metaLabel}>
+                          客户端主页
+                        </Text>
+                        <Paragraph copyable style={{ marginBottom: 0 }}>
+                          {context.clientUri}
+                        </Paragraph>
+                      </div>
+                    )}
+                    {context.interactionPage && (
+                      <div>
+                        <Text type="secondary" className={styles.metaLabel}>
+                          交互入口
+                        </Text>
+                        <Paragraph copyable style={{ marginBottom: 0 }}>
+                          {context.interactionPage}
+                        </Paragraph>
+                      </div>
+                    )}
                   </Space>
                 </div>
-              </Space>
+              </div>
             </Card>
 
             {error && <Alert type="error" showIcon message="操作失败" description={error} />}
 
-            <Card title="授权上下文" bordered={false} style={{ borderRadius: 20 }}>
+            <Card title="授权上下文" bordered={false} className={styles.surfaceCard}>
               <Row gutter={[16, 16]}>
                 <Col xs={24} md={12}>
                   <Text type="secondary">回调地址</Text>
@@ -252,6 +315,14 @@ export default function AuthorizeInteractionPage() {
                   <Text type="secondary">允许动作</Text>
                   <Paragraph style={{ marginBottom: 0 }}>{context.availableActions.join(' / ')}</Paragraph>
                 </Col>
+                <Col xs={24} md={12}>
+                  <Text type="secondary">过期时间</Text>
+                  <Paragraph style={{ marginBottom: 0 }}>{new Date(context.expiresAt).toLocaleString()}</Paragraph>
+                </Col>
+                <Col xs={24} md={12}>
+                  <Text type="secondary">请求状态</Text>
+                  <Paragraph style={{ marginBottom: 0 }}>{context.state || '未携带 state'}</Paragraph>
+                </Col>
               </Row>
             </Card>
 
@@ -260,7 +331,7 @@ export default function AuthorizeInteractionPage() {
                 title={currentStep === 'select_account' ? '选择账号' : '登录账号'}
                 extra={context.selectedAccount ? <Tag color="success">当前账号：{context.selectedAccount.displayName || context.selectedAccount.subjectId}</Tag> : null}
                 bordered={false}
-                style={{ borderRadius: 20 }}
+                className={styles.surfaceCard}
               >
                 {context.availableAccounts.length > 0 ? (
                   <List
@@ -269,17 +340,7 @@ export default function AuthorizeInteractionPage() {
                     renderItem={(account) => {
                       const active = (selectedSubjectId || context.selectedAccount?.subjectId) === account.subjectId;
                       return (
-                        <List.Item
-                          onClick={() => setSelectedSubjectId(account.subjectId)}
-                          style={{
-                            cursor: 'pointer',
-                            padding: 16,
-                            borderRadius: 16,
-                            marginBottom: 12,
-                            border: active ? '1px solid #1677ff' : '1px solid #f0f0f0',
-                            background: active ? '#f0f7ff' : '#fff',
-                          }}
-                        >
+                        <List.Item onClick={() => setSelectedSubjectId(account.subjectId)} className={`${styles.accountCard} ${active ? styles.accountCardActive : ''}`}>
                           <List.Item.Meta
                             avatar={<Avatar icon={<LockOutlined />} />}
                             title={
@@ -322,21 +383,21 @@ export default function AuthorizeInteractionPage() {
                 title="确认权限与风险"
                 extra={context.selectedAccount ? <Tag color="processing">授权账号：{context.selectedAccount.displayName || context.selectedAccount.subjectId}</Tag> : null}
                 bordered={false}
-                style={{ borderRadius: 20 }}
+                className={styles.surfaceCard}
               >
                 <Space direction="vertical" size={20} style={{ width: '100%' }}>
                   {scopeGroups.map(([group, scopes]) => (
-                    <Card key={group} type="inner" title={group}>
+                    <Card key={group} type="inner" title={group} className={styles.scopeGroupCard}>
                       <Space direction="vertical" size={16} style={{ width: '100%' }}>
                         {scopes.map((scope) => {
                           const checked = selectedScopes.includes(scope.name);
                           return (
-                            <div key={scope.name} style={{ border: '1px solid #f0f0f0', borderRadius: 16, padding: 16 }}>
-                              <Row gutter={[16, 12]} align="top">
-                                <Col flex="32px">
+                            <div key={scope.name} className={styles.scopeItem}>
+                              <div className={styles.scopeItemHeader}>
+                                <div>
                                   <Checkbox checked={checked} disabled={!scope.isSelectable} onChange={(event) => handleScopeToggle(scope, event.target.checked)} />
-                                </Col>
-                                <Col flex="auto">
+                                </div>
+                                <div className={styles.scopeBody}>
                                   <Space wrap style={{ marginBottom: 8 }}>
                                     <Text strong>{scope.displayName || scope.name}</Text>
                                     <Tag color={riskColorMap[scope.riskLevel] ?? 'default'}>{scope.riskLevel.toUpperCase()}</Tag>
@@ -353,7 +414,7 @@ export default function AuthorizeInteractionPage() {
                                       style={{ marginBottom: 12 }}
                                       message="授权提醒"
                                       description={
-                                        <ul style={{ paddingInlineStart: 18, margin: 0 }}>
+                                        <ul className={styles.warningList}>
                                           {scope.consentWarnings.map((warning) => (
                                             <li key={warning}>{warning}</li>
                                           ))}
@@ -383,8 +444,8 @@ export default function AuthorizeInteractionPage() {
                                       </Space>
                                     </div>
                                   )}
-                                </Col>
-                              </Row>
+                                </div>
+                              </div>
                             </div>
                           );
                         })}
@@ -401,28 +462,27 @@ export default function AuthorizeInteractionPage() {
               </Card>
             )}
 
-            <Card bordered={false} style={{ borderRadius: 20 }}>
-              <Row justify="space-between" align="middle" gutter={[12, 12]}>
-                <Col>
-                  <Space wrap>
-                    <Button onClick={() => void loadContext()}>刷新上下文</Button>
-                    <Button danger onClick={() => void handleAction('deny')} loading={submittingAction === 'deny'}>
-                      拒绝授权
-                    </Button>
-                  </Space>
-                </Col>
-                <Col>
-                  <Button
-                    type="primary"
-                    size="large"
-                    loading={submittingAction === primaryAction}
-                    disabled={!canSubmitPrimary}
-                    onClick={() => void handleAction(primaryAction as 'login' | 'select_account' | 'consent')}
-                  >
-                    {primaryActionLabel}
+            <Card bordered={false} className={styles.actionCard}>
+              <div className={styles.footerActions}>
+                <Space wrap>
+                  <Button icon={<LinkOutlined />} onClick={() => void loadContext()}>
+                    刷新上下文
                   </Button>
-                </Col>
-              </Row>
+                  <Button danger onClick={() => void handleAction('deny')} loading={submittingAction === 'deny'}>
+                    拒绝授权
+                  </Button>
+                </Space>
+
+                <Button
+                  type="primary"
+                  size="large"
+                  loading={submittingAction === primaryAction}
+                  disabled={!canSubmitPrimary}
+                  onClick={() => void handleAction(primaryAction as 'login' | 'select_account' | 'consent')}
+                >
+                  {primaryActionLabel}
+                </Button>
+              </div>
             </Card>
           </Space>
         </Col>

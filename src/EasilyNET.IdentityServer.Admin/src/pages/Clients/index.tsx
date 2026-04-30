@@ -1,9 +1,12 @@
 import { Client, createClient, CreateClientRequest, deleteClient, getApiScopes, getClient, getClients, getIdentityResources, updateClient, UpdateClientRequest } from '@/services/api';
-import { PlusOutlined } from '@ant-design/icons';
+import { PlusOutlined, SafetyCertificateOutlined, SearchOutlined } from '@ant-design/icons';
 import { PageContainer } from '@ant-design/pro-components';
 import { useRequest } from '@umijs/max';
-import { Alert, Button, Card, Col, Form, Input, InputNumber, message, Modal, Popconfirm, Row, Select, Space, Switch, Table, Tag } from 'antd';
+import { Alert, Button, Card, Col, Form, Input, InputNumber, message, Modal, Popconfirm, Row, Select, Space, Statistic, Switch, Table, Tag, Tooltip, Typography } from 'antd';
 import { useCallback, useMemo, useState } from 'react';
+import styles from './index.module.css';
+
+const { Text } = Typography;
 
 const grantTypeOptions = [
   { label: 'Authorization Code', value: 'authorization_code' },
@@ -27,6 +30,7 @@ const clientTypeOptions = [
 export default function ClientsPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [keyword, setKeyword] = useState('');
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [form] = Form.useForm();
   const watchedClientType = Form.useWatch('clientType', form);
@@ -43,6 +47,39 @@ export default function ClientsPage() {
       })),
     [apiScopes, identityResources],
   );
+
+  const filteredClients = useMemo(() => {
+    const normalizedKeyword = keyword.trim().toLowerCase();
+    if (!normalizedKeyword) {
+      return clients ?? [];
+    }
+
+    return (clients ?? []).filter((client) => {
+      const haystack = [
+        client.clientId,
+        client.clientName,
+        client.description,
+        ...(client.allowedGrantTypes ?? []),
+        ...(client.authorizationPromptTypes ?? []),
+        ...(client.identityProviderRestrictions ?? []),
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+
+      return haystack.includes(normalizedKeyword);
+    });
+  }, [clients, keyword]);
+
+  const summary = useMemo(() => {
+    const source = clients ?? [];
+    return {
+      total: source.length,
+      enabled: source.filter((item) => item.enabled).length,
+      confidential: source.filter((item) => item.clientType === 0).length,
+      requireConsent: source.filter((item) => item.requireConsent).length,
+    };
+  }, [clients]);
 
   const handleCreate = useCallback(() => {
     setEditingId(null);
@@ -149,8 +186,24 @@ export default function ClientsPage() {
   );
 
   const columns = [
-    { title: 'Client ID', dataIndex: 'clientId', key: 'clientId', width: 150, ellipsis: true },
-    { title: '名称', dataIndex: 'clientName', key: 'clientName', width: 120, ellipsis: true },
+    {
+      title: '客户端',
+      key: 'client',
+      width: 260,
+      render: (_: unknown, record: Client) => (
+        <div className={styles.clientTitle}>
+          <Text className={styles.clientId}>{record.clientName || record.clientId}</Text>
+          <Text type="secondary" className={styles.clientMeta}>
+            {record.clientId}
+          </Text>
+          {record.description && (
+            <Text type="secondary" ellipsis={{ tooltip: record.description }}>
+              {record.description}
+            </Text>
+          )}
+        </div>
+      ),
+    },
     {
       title: '状态',
       dataIndex: 'enabled',
@@ -169,7 +222,13 @@ export default function ClientsPage() {
       title: '授权类型',
       dataIndex: 'allowedGrantTypes',
       key: 'allowedGrantTypes',
-      render: (v: string[]) => v?.map((g: string) => <Tag key={g}>{g}</Tag>),
+      render: (v: string[]) => (
+        <div className={styles.tagWrap}>
+          {v?.map((g: string) => (
+            <Tag key={g}>{g}</Tag>
+          ))}
+        </div>
+      ),
     },
     {
       title: 'Prompt 限制',
@@ -178,11 +237,13 @@ export default function ClientsPage() {
       width: 180,
       render: (v?: string[]) =>
         v && v.length > 0 ? (
-          v.map((prompt) => (
-            <Tag key={prompt} color="processing">
-              {prompt}
-            </Tag>
-          ))
+          <div className={styles.tagWrap}>
+            {v.map((prompt) => (
+              <Tag key={prompt} color="processing">
+                {prompt}
+              </Tag>
+            ))}
+          </div>
         ) : (
           <Tag>全部允许</Tag>
         ),
@@ -194,14 +255,29 @@ export default function ClientsPage() {
       width: 180,
       render: (v?: string[]) =>
         v && v.length > 0 ? (
-          v.map((provider) => (
-            <Tag key={provider} color="purple">
-              {provider}
-            </Tag>
-          ))
+          <div className={styles.tagWrap}>
+            {v.map((provider) => (
+              <Tag key={provider} color="purple">
+                {provider}
+              </Tag>
+            ))}
+          </div>
         ) : (
           <Tag>全部允许</Tag>
         ),
+    },
+    {
+      title: '安全态势',
+      key: 'securityPosture',
+      width: 200,
+      render: (_: unknown, record: Client) => (
+        <div className={styles.tagWrap}>
+          {record.requirePkce && <Tag color="blue">PKCE</Tag>}
+          {record.requireConsent && <Tag color="gold">Consent</Tag>}
+          {record.requireClientSecret && <Tag color="green">Secret</Tag>}
+          {!record.requireClientSecret && <Tag color="volcano">Public</Tag>}
+        </div>
+      ),
     },
     {
       title: '操作',
@@ -220,19 +296,52 @@ export default function ClientsPage() {
 
   return (
     <PageContainer>
-      <div style={{ marginBottom: 16 }}>
-        <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
-          新建客户端
-        </Button>
+      <div className={styles.summaryGrid}>
+        <Card className={styles.summaryCard}>
+          <Statistic title="客户端总数" value={summary.total} prefix={<SafetyCertificateOutlined />} />
+        </Card>
+        <Card className={styles.summaryCard}>
+          <Statistic title="已启用" value={summary.enabled} valueStyle={{ color: '#1677ff' }} />
+        </Card>
+        <Card className={styles.summaryCard}>
+          <Statistic title="机密客户端" value={summary.confidential} valueStyle={{ color: '#13a8a8' }} />
+        </Card>
+        <Card className={styles.summaryCard}>
+          <Statistic title="需要 Consent" value={summary.requireConsent} valueStyle={{ color: '#d48806' }} />
+        </Card>
       </div>
-      <Table columns={columns} dataSource={clients} loading={loading} rowKey="id" pagination={{ pageSize: 10 }} />
+
+      <Card className={styles.tableCard} bordered={false}>
+        <div className={styles.toolbar}>
+          <div>
+            <Text type="secondary">面向管理员的快速总览：先筛选，再钻取编辑。</Text>
+          </div>
+          <div className={styles.toolbarActions}>
+            <Input
+              allowClear
+              prefix={<SearchOutlined />}
+              placeholder="搜索 Client ID、名称、Grant、Prompt、IdP"
+              style={{ width: 320, maxWidth: '100%' }}
+              value={keyword}
+              onChange={(event) => setKeyword(event.target.value)}
+            />
+            <Tooltip title="创建新的 OAuth / OIDC 客户端配置">
+              <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
+                新建客户端
+              </Button>
+            </Tooltip>
+          </div>
+        </div>
+
+        <Table columns={columns} dataSource={filteredClients} loading={loading} rowKey="id" pagination={{ pageSize: 10 }} scroll={{ x: 1180 }} />
+      </Card>
 
       <Modal title={editingId ? '编辑客户端' : '新建客户端'} open={modalOpen} onOk={handleSubmit} onCancel={() => setModalOpen(false)} width={720} destroyOnClose maskClosable={false}>
         <Form form={form} layout="vertical" size="middle">
           {submitError && <Alert type="error" showIcon message="提交失败" description={submitError} style={{ marginBottom: 16 }} />}
 
           {!editingId && (
-            <Card title="基本信息" size="small">
+            <Card title="基本信息" size="small" className={styles.modalSection}>
               <Row gutter={16}>
                 <Col span={12}>
                   <Form.Item name="clientId" label="Client ID" rules={[{ required: true, message: '请输入 Client ID' }]}>
@@ -248,7 +357,7 @@ export default function ClientsPage() {
             </Card>
           )}
 
-          <Card title="基本信息" size="small" style={{ marginTop: 16 }}>
+          <Card title="基本信息" size="small" className={styles.modalSection}>
             <Row gutter={16}>
               <Col span={12}>
                 <Form.Item name="clientName" label="客户端名称">
@@ -278,7 +387,7 @@ export default function ClientsPage() {
             </Form.Item>
           </Card>
 
-          <Card title="授权配置" size="small" style={{ marginTop: 16 }}>
+          <Card title="授权配置" size="small" className={styles.modalSection}>
             <Row gutter={16}>
               <Col span={12}>
                 <Form.Item name="requirePkce" label="要求 PKCE" valuePropName="checked">
@@ -324,7 +433,7 @@ export default function ClientsPage() {
             </Form.Item>
           </Card>
 
-          <Card title="重定向配置" size="small" style={{ marginTop: 16 }}>
+          <Card title="重定向配置" size="small" className={styles.modalSection}>
             <Form.Item
               name="redirectUris"
               label="重定向 URI"
@@ -373,7 +482,7 @@ export default function ClientsPage() {
             </Form.Item>
           </Card>
 
-          <Card title="令牌配置" size="small" style={{ marginTop: 16 }}>
+          <Card title="令牌配置" size="small" className={styles.modalSection}>
             <Row gutter={16}>
               <Col span={12}>
                 <Form.Item name="accessTokenLifetime" label="Access Token 有效期(秒)">
@@ -401,7 +510,7 @@ export default function ClientsPage() {
           </Card>
 
           {!editingId && (
-            <Card title="安全配置" size="small" style={{ marginTop: 16 }}>
+            <Card title="安全配置" size="small" className={styles.modalSection}>
               <Form.Item name="clientSecret" label="Client Secret" extra="留空则不设置 Secret" hidden={watchedClientType === 1}>
                 <Input.Password placeholder="留空则不设置" />
               </Form.Item>
@@ -409,7 +518,7 @@ export default function ClientsPage() {
           )}
 
           {editingId && (
-            <Card title="密钥轮换" size="small" style={{ marginTop: 16 }}>
+            <Card title="密钥轮换" size="small" className={styles.modalSection}>
               <Form.Item name="clientSecret" label="新的 Client Secret" extra="填写后将替换现有密钥" hidden={watchedClientType === 1}>
                 <Input.Password placeholder="留空表示不变更" />
               </Form.Item>

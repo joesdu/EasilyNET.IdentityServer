@@ -1,0 +1,75 @@
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.toolbarActions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.summaryGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.summaryCard {
+  border-radius: 20px;
+  border: 1px solid #eef2f8;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.04);
+}
+
+.tableCard {
+  border-radius: 20px;
+  border: 1px solid #eef2f8;
+  box-shadow: 0 12px 34px rgba(15, 23, 42, 0.05);
+}
+
+.clientTitle {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.clientId {
+  font-weight: 600;
+}
+
+.clientMeta {
+  font-size: 12px;
+}
+
+.tagWrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.modalSection {
+  margin-top: 16px;
+  border-radius: 16px;
+}
+
+@media (max-width: 991px) {
+  .summaryGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+@media (max-width: 575px) {
+  .summaryGrid {
+    grid-template-columns: 1fr;
+  }
+}
